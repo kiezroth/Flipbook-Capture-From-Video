@@ -111,26 +111,26 @@ test('undo/redo covers capture, rename, crop, delete', async () => {
   await doc.execute({ type: 'deleteFrame', id })
   expect(doc.state.project.frames).toHaveLength(0)
 
-  doc.undo()
+  await doc.undo()
   expect(doc.state.project.frames[0]).toMatchObject({ baseName: 'slash', crop: { x: 1, y: 2, w: 3, h: 4 } })
-  doc.undo()
+  await doc.undo()
   expect(doc.state.project.frames[0]).toMatchObject({ baseName: 'slash', crop: null })
-  doc.undo()
+  await doc.undo()
   expect(doc.state.project.frames[0].baseName).toBeNull()
-  doc.undo()
+  await doc.undo()
   expect(doc.state.project.frames).toHaveLength(0)
   expect(doc.state.canUndo).toBe(false)
   expect(doc.state.canRedo).toBe(true)
   expect(existsSync(join(ws.framesDir, `${id}.png`))).toBe(true) // PNG kept for redo
 
-  doc.redo()
-  doc.redo()
-  doc.redo()
+  await doc.redo()
+  await doc.redo()
+  await doc.redo()
   expect(doc.state.project.frames[0]).toMatchObject({ baseName: 'slash', crop: { x: 1, y: 2, w: 3, h: 4 } })
-  doc.redo()
+  await doc.redo()
   expect(doc.state.project.frames).toHaveLength(0)
   expect(doc.state.canRedo).toBe(false)
-  doc.undo()
+  await doc.undo()
   expect(doc.state.project.frames).toHaveLength(1)
 })
 
@@ -138,13 +138,13 @@ test('delete undo restores the original position', async () => {
   const a = idOf(await doc.execute({ type: 'captureFrame', frameIndex: 1, useSelection: false }))
   await doc.execute({ type: 'captureFrame', frameIndex: 2, useSelection: false })
   await doc.execute({ type: 'deleteFrame', id: a })
-  doc.undo()
+  await doc.undo()
   expect(doc.state.project.frames.map((f) => f.id)).toEqual(['id1', 'id2'])
 })
 
 test('new command clears redo; selection/settings are not in history', async () => {
   await doc.execute(capture36)
-  doc.undo()
+  await doc.undo()
   expect(doc.state.canRedo).toBe(true)
   await doc.execute({ type: 'setSelection', rect: null })
   expect(doc.state.canRedo).toBe(true)
@@ -153,6 +153,64 @@ test('new command clears redo; selection/settings are not in history', async () 
   expect(doc.state.project.exportSettings.gap).toBe(9)
   await doc.execute(capture36)
   expect(doc.state.canRedo).toBe(false)
+})
+
+test('no-op rename and setCrop add no history and no dirty', async () => {
+  const id = idOf(await doc.execute(capture36))
+  await doc.markSaved()
+  expect(await doc.execute({ type: 'renameFrame', id, baseName: '  ' })).toMatchObject({ ok: true })
+  expect(await doc.execute({ type: 'setCrop', id, crop: null })).toMatchObject({ ok: true })
+  await doc.execute({ type: 'setCrop', id, crop: { x: 1, y: 1, w: 2, h: 2 } })
+  await doc.markSaved()
+  await doc.execute({ type: 'setCrop', id, crop: { x: 1, y: 1, w: 2, h: 2 } })
+  expect(doc.state.dirty).toBe(false)
+  await doc.undo()
+  expect(doc.state.project.frames[0].crop).toBeNull() // only one crop entry in history
+})
+
+test('failing workspace write: execute still returns the real result, writeError emitted', async () => {
+  const errors: unknown[] = []
+  doc.on('writeError', (e) => errors.push(e))
+  vi.spyOn(ws, 'write').mockRejectedValueOnce(new Error('disk'))
+  expect(await doc.execute(capture36)).toMatchObject({ ok: true })
+  expect(errors).toHaveLength(1)
+  expect(doc.state.project.frames).toHaveLength(1)
+  expect(doc.state.canUndo).toBe(true)
+  expect(doc.state.dirty).toBe(true)
+})
+
+test('failing workspace write on undo emits writeError', async () => {
+  await doc.execute(capture36)
+  const errors: unknown[] = []
+  doc.on('writeError', (e) => errors.push(e))
+  vi.spyOn(ws, 'write').mockRejectedValueOnce(new Error('disk'))
+  await doc.undo()
+  expect(errors).toHaveLength(1)
+  expect(doc.state.project.frames).toHaveLength(0)
+})
+
+test('undo issued during an in-flight capture applies after it', async () => {
+  let release: (() => void) | undefined
+  fakeExtract.mockImplementationOnce(
+    (_s: VideoSource, _p: number, _t: number, _r: unknown, out: string) =>
+      new Promise<void>((res) => {
+        release = () => {
+          writeFileSync(out, PNG)
+          res()
+        }
+      })
+  )
+  const cap = doc.execute(capture36)
+  const und = doc.undo()
+  const saved = doc.markSaved()
+  await vi.waitFor(() => expect(release).toBeDefined())
+  release!()
+  expect(await cap).toMatchObject({ ok: true })
+  await und
+  await saved
+  expect(doc.state.project.frames).toHaveLength(0) // the undo undid the capture
+  expect(doc.state.canRedo).toBe(true)
+  expect(doc.state.dirty).toBe(false) // markSaved ran last
 })
 
 test('rename blank becomes null', async () => {
@@ -175,15 +233,15 @@ test('dirty tracking', async () => {
   expect(doc.state.dirty).toBe(false)
   await doc.execute(capture36)
   expect(doc.state.dirty).toBe(true)
-  doc.markSaved()
+  await doc.markSaved()
   expect(doc.state.dirty).toBe(false)
   await doc.execute({ type: 'setSelection', rect: { x: 0, y: 0, w: 5, h: 5 } })
   expect(doc.state.dirty).toBe(true)
-  doc.markSaved()
-  doc.undo()
+  await doc.markSaved()
+  await doc.undo()
   expect(doc.state.dirty).toBe(true)
-  doc.markSaved()
-  doc.redo()
+  await doc.markSaved()
+  await doc.redo()
   expect(doc.state.dirty).toBe(true)
 })
 
@@ -192,11 +250,11 @@ test('workspace persists every change and is recoverable', async () => {
   let found = await Workspace.findRecoverable(root)
   expect(found[0].project.frames).toHaveLength(1)
   expect(found[0].meta.dirty).toBe(true)
-  doc.undo()
+  await doc.undo()
   await doc.idle()
   found = await Workspace.findRecoverable(root)
   expect(found[0].project.frames).toHaveLength(0)
-  doc.markSaved()
+  await doc.markSaved()
   await doc.idle()
   expect(await Workspace.findRecoverable(root)).toEqual([])
 })
