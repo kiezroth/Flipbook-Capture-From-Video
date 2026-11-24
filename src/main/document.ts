@@ -49,7 +49,7 @@ export class ProjectDocument extends EventEmitter {
   private readonly workspace: Workspace
   private readonly pts: number[]
   private readonly video: VideoInfo
-  private readonly source: VideoSource
+  private source: VideoSource
   private readonly extract: typeof extractFrame
   private readonly newId: () => string
 
@@ -61,8 +61,11 @@ export class ProjectDocument extends EventEmitter {
     project?: ProjectFile
     extract: typeof extractFrame
     newId?: () => string
+    /** Start dirty (imported video, recovered session). */
+    dirty?: boolean
   }) {
     super()
+    this.dirty = o.dirty === true
     this.workspace = o.workspace
     this.pts = o.pts
     this.video = o.video
@@ -95,6 +98,11 @@ export class ProjectDocument extends EventEmitter {
   setMeta(meta: Omit<SessionMeta, 'dirty'>): Promise<void> {
     this.meta = { ...meta }
     return this.persist()
+  }
+
+  /** Where captures read the video from; changes when a save moves the video into a (new) .fbproj. */
+  setSource(source: VideoSource): void {
+    this.source = source
   }
 
   /** Commands run strictly one at a time, in call order. */
