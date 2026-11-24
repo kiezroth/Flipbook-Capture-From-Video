@@ -27,6 +27,14 @@ export interface Toast {
   text: string
 }
 
+/** What the "Kết nối với Claude" dialog needs to build the `claude mcp add` command. */
+export interface ConnectInfo {
+  exePath: string
+  serverPath: string
+  /** Default roots: the open project's folder, else Documents. */
+  roots: string[]
+}
+
 export type ExportResponse = { ok: true; files: string[] } | { ok: false; message: string }
 
 export interface FcApi {
@@ -42,6 +50,9 @@ export interface FcApi {
   exportFlipbook(s: ExportSettings): Promise<ExportResponse>
   /** Folder picker for the export dialog; null when cancelled. */
   pickExportDir(current: string | null): Promise<string | null>
+  /** Folder picker for the MCP roots in the connect dialog; null when cancelled. */
+  pickRootDir(): Promise<string | null>
+  getConnectInfo(): Promise<ConnectInfo>
   cancelBusy(): void
   reportVideoError(): void
   /** The player's speed changed (on-screen buttons): main checks the matching View menu item. */
@@ -54,6 +65,8 @@ export const IPC = {
   execute: 'fc:execute', // invoke
   exportFlipbook: 'fc:exportFlipbook', // invoke
   pickExportDir: 'fc:pickExportDir', // invoke
+  pickRootDir: 'fc:pickRootDir', // invoke
+  getConnectInfo: 'fc:getConnectInfo', // invoke
   undo: 'fc:undo', // send
   redo: 'fc:redo', // send
   cancelBusy: 'fc:cancelBusy', // send

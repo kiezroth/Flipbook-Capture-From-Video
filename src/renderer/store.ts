@@ -23,6 +23,8 @@ export interface Store {
   toastId: number
   /** The Export Flipbook dialog is open. */
   exportOpen: boolean
+  /** The Help > Kết nối với Claude dialog is open. */
+  connectOpen: boolean
 
   setAppState(s: RendererState): void
   selectFrame(id: string | null): void
@@ -32,6 +34,8 @@ export interface Store {
   /** Ctrl+E / File > Export Flipbook: opens the dialog, or a toast when there is nothing to export. */
   openExport(): void
   closeExport(): void
+  openConnect(): void
+  closeConnect(): void
   /**
    * Capture (T / Ctrl+T): pauses on the frame on screen, waits until the player has verified it, then asks main to
    * capture that frame. The new frame becomes the selected one; a refusal (duplicate, no selection, mismatch) is a toast.
@@ -70,6 +74,7 @@ export const useStore = create<Store>()((set, get) => ({
   toast: null,
   toastId: 0,
   exportOpen: false,
+  connectOpen: false,
 
   setAppState(s) {
     const prev = get().app?.video ?? null
@@ -102,6 +107,8 @@ export const useStore = create<Store>()((set, get) => ({
     set({ exportOpen: true })
   },
   closeExport: () => set({ exportOpen: false }),
+  openConnect: () => set({ connectOpen: true }),
+  closeConnect: () => set({ connectOpen: false }),
 
   async capture(useSelection) {
     const controller = get().controller

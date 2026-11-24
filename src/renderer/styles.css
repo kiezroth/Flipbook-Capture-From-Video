@@ -528,3 +528,22 @@ button.active {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* Connect dialog: the command is selectable text */
+.dialog.connect {
+  width: 620px;
+}
+.dialog.connect p {
+  margin: 0;
+}
+.dialog textarea.command {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 6px;
+  font-family: Consolas, monospace;
+  user-select: text;
+}

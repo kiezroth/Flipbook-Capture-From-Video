@@ -1,8 +1,10 @@
+import { dirname, join } from 'node:path'
+
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 
 import type { ExportSettings } from '../core/types'
 import type { DocCommand, PlaybackCommand } from '../shared/commands'
-import { IPC, type MenuEvent, type RendererState, type Toast } from '../shared/ipc'
+import { IPC, type ConnectInfo, type MenuEvent, type RendererState, type Toast } from '../shared/ipc'
 import type { ProjectSession } from './session'
 
 const RELEASE_TIMEOUT_MS = 2000
@@ -30,6 +32,18 @@ export function registerIpc(session: ProjectSession, win: () => BrowserWindow | 
     const opts = { title: 'Chọn thư mục xuất', defaultPath: current ?? undefined, properties: ['openDirectory' as const, 'createDirectory' as const] }
     const r = await (w ? dialog.showOpenDialog(w, opts) : dialog.showOpenDialog(opts))
     return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]
+  })
+  ipcMain.handle(IPC.pickRootDir, async () => {
+    if (process.env.FC_E2E) return process.env.FC_E2E_OUT_DIR || null
+    const w = win()
+    const opts = { title: 'Chọn thư mục cho Claude đọc', properties: ['openDirectory' as const] }
+    const r = await (w ? dialog.showOpenDialog(w, opts) : dialog.showOpenDialog(opts))
+    return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]
+  })
+  ipcMain.handle(IPC.getConnectInfo, (): ConnectInfo => {
+    // Packaged: <resources>\mcp\server.cjs (extraResources). Dev: the bundle built into out/mcp, next to out/main.
+    const serverPath = app.isPackaged ? join(process.resourcesPath, 'mcp', 'server.cjs') : join(__dirname, '..', 'mcp', 'server.cjs')
+    return { exePath: process.execPath, serverPath, roots: [session.filePath ? dirname(session.filePath) : app.getPath('documents')] }
   })
   ipcMain.on(IPC.undo, () => toastOnError(session, session.undo()))
   ipcMain.on(IPC.redo, () => toastOnError(session, session.redo()))

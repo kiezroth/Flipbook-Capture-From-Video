@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 
 import { frameMs } from '@core/timing'
 import { BusyOverlay } from './dialogs/BusyOverlay'
+import { ConnectClaudeDialog } from './dialogs/ConnectClaudeDialog'
 import { ExportDialog } from './dialogs/ExportDialog'
 import { Toast } from './dialogs/Toast'
 import { keyToAction } from './keymap'
@@ -35,6 +36,7 @@ function useMainProcessBridge(): void {
       window.fc.onMenu((m) => {
         if (m === 'deleteFrame') store().runAction({ kind: 'deleteSelectedFrame' })
         else if (m === 'export') store().openExport()
+        else if (m === 'connectClaude') store().openConnect()
       }),
       // the View menu's speed radio follows the on-screen speed buttons
       useStore.subscribe((s, prev) => {
@@ -96,6 +98,7 @@ export function App() {
       {video && <FrameStrip />}
       <StatusBar />
       <ExportDialog />
+      <ConnectClaudeDialog />
       <BusyOverlay />
       <Toast />
     </div>
