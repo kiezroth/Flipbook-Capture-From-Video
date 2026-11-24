@@ -295,3 +295,34 @@ test('export uses project folder and name by default', async () => {
   const r2 = await unsaved.exportFlipbook(unsaved.doc!.state.project.exportSettings, { documentsDir: join(tmp, 'docs') })
   expect(r2.ok && r2.files[0]).toBe(join(tmp, 'docs', 'flipbook_p1.png'))
 })
+
+test('a cancelled proxy stays cancelled: a later video error report does not restart it', async () => {
+  const onBusy = (b: { cancellable: boolean } | null): void => {
+    if (b?.cancellable) s.cancelBusy()
+  }
+  s.on('progress', onBusy)
+  await s.importVideo(FIXTURES.hevc)
+  s.off('progress', onBusy)
+  expect(s.media().proxyPath).toBeNull()
+  expect(toasts.at(-1)?.kind).toBe('info')
+
+  const busy: unknown[] = []
+  s.on('progress', (b) => busy.push(b))
+  await s.reportVideoError() // the <video> fails on HEVC after the cancel
+  expect(busy).toEqual([])
+  expect(s.media().proxyPath).toBeNull()
+  expect(existsSync(join(tmp, 'cache')) ? readdirSync(join(tmp, 'cache')) : []).toEqual([])
+})
+
+test('video error reports arriving while the player is released for a save are ignored', async () => {
+  await s.importVideo(FIXTURES.cfr30)
+  pickSave.mockResolvedValue(join(tmp, 'p.fbproj'))
+  await s.save()
+  await s.open(join(tmp, 'p.fbproj'))
+  // the released player (or a request that got a 404 meanwhile) reports an error during the save
+  releaseVideo.mockImplementation(async () => void s.reportVideoError())
+  expect(await s.save()).toBe(true)
+  expect(releaseVideo).toHaveBeenCalled()
+  await s.undo() // flush the operation queue
+  expect(s.media().proxyPath).toBeNull()
+})

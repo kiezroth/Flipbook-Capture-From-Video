@@ -41,6 +41,8 @@ interface Loaded {
   pts: number[]
   info: VideoInfo
   proxyPath: string | null
+  /** A proxy was already made, cancelled or failed for this video: video errors must not start another one. */
+  proxyTried: boolean
 }
 
 const mb = (bytes: number): string => (bytes / (1024 * 1024)).toFixed(1)
@@ -150,15 +152,22 @@ export class ProjectSession extends EventEmitter {
     return this.exclusive(() => this.recoverNow())
   }
 
-  /** The <video> element could not play the video: make a proxy even for an allowed codec. */
+  /**
+   * The <video> element could not play the video: make a proxy even for an allowed codec. Ignored while the player
+   * is released for a save (its requests may fail then), and once a proxy was made, cancelled or failed.
+   */
   reportVideoError(): Promise<void> {
+    // checked at call time: a report queued behind the save would otherwise run after `releasing` is cleared
+    if (this.releasing) return Promise.resolve()
     return this.exclusive(async () => {
       const L = this.loaded
-      if (!L) return
+      if (!L || this.releasing) return
       if (L.proxyPath) {
         this.toast('error', 'Không phát được video này, kể cả bản proxy.')
         return
       }
+      if (L.proxyTried) return
+      L.proxyTried = true
       const proxy = await this.makeProxyFor(L.source, L.info)
       if (proxy && this.loaded === L) {
         L.proxyPath = proxy
@@ -352,7 +361,7 @@ export class ProjectSession extends EventEmitter {
       const doc = new ProjectDocument({ workspace, pts, video: info, source, project, extract: extractFrame, dirty: true })
       await doc.setMeta({ videoOrigin: { kind: 'file', path: source.path }, savedPath: this.path })
       const proxyPath = needsProxy(info) ? await this.makeProxyFor(source, info) : null
-      await this.switchTo({ workspace, doc, source, reader: null, pts, info, proxyPath }, this.path)
+      await this.switchTo({ workspace, doc, source, reader: null, pts, info, proxyPath, proxyTried: needsProxy(info) }, this.path)
     } catch (e) {
       await workspace?.dispose()
       this.toast('error', `Không nhập được video: ${errText(e)}`)
@@ -377,7 +386,7 @@ export class ProjectSession extends EventEmitter {
       const doc = new ProjectDocument({ workspace, pts, video: info, source: reader.video, project: reader.project, extract: extractFrame })
       await doc.setMeta({ videoOrigin: { kind: 'fbproj', path: target }, savedPath: target })
       const proxyPath = needsProxy(info) ? await this.makeProxyFor(reader.video, info) : null
-      await this.switchTo({ workspace, doc, source: reader.video, reader, pts, info, proxyPath }, target)
+      await this.switchTo({ workspace, doc, source: reader.video, reader, pts, info, proxyPath, proxyTried: needsProxy(info) }, target)
     } catch (e) {
       await got.reader?.close()
       await got.workspace?.dispose()
@@ -525,7 +534,7 @@ export class ProjectSession extends EventEmitter {
         savedPath
       })
       const proxyPath = needsProxy(info) ? await this.makeProxyFor(source, info) : null
-      await this.switchTo({ workspace, doc, source, reader, pts, info, proxyPath }, savedPath)
+      await this.switchTo({ workspace, doc, source, reader, pts, info, proxyPath, proxyTried: needsProxy(info) }, savedPath)
       return true
     } catch (e) {
       await reader?.close()
