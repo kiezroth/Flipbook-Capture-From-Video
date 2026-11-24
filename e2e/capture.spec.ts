@@ -253,3 +253,19 @@ test('the strip scrolls to the selected frame', async () => {
   await expect(item.last()).toBeInViewport()
   expect(await strip.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0)
 })
+
+test('a capture that fails in main shows an error toast and adds nothing', async () => {
+  await importVideo(FIXTURES.cfr30)
+  await stepTo(4)
+  // make the frame extraction itself throw (not a frame mismatch), as a crashed or missing ffmpeg would
+  await app.evaluate(() => {
+    ;(globalThis as any).__fc.session.doc.extract = async () => {
+      throw new Error('ffmpeg exploded')
+    }
+  })
+  await win.keyboard.press('t')
+  await expect(win.getByTestId('toast')).toContainText('ffmpeg exploded')
+  await expect(win.getByTestId('toast')).toContainText('Không chụp được frame')
+  await expect(win.getByTestId('strip-item')).toHaveCount(0)
+  expect((await state()).project!.frames).toHaveLength(0)
+})

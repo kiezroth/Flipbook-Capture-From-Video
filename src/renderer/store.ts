@@ -58,6 +58,8 @@ export const INITIAL_PLAYER: PlayerStatus = {
 const NO_VIDEO = 'Chưa có video. Hãy dùng File › Import Video (Ctrl+I).'
 const MISMATCH = 'Không khớp frame đang hiển thị, chưa thể chụp. Hãy tua sang frame khác rồi quay lại.'
 
+const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
 function samePts(a: number[], b: number[]): boolean {
   if (a === b) return true
   if (a.length !== b.length) return false
@@ -116,34 +118,44 @@ export const useStore = create<Store>()((set, get) => ({
       get().showToast({ kind: 'error', text: NO_VIDEO })
       return
     }
-    const frameIndex = await controller.pauseAndSettle()
-    if (get().controller !== controller) return // the video changed meanwhile: that frame is gone
-    if (!controller.verified) {
-      get().showToast({ kind: 'error', text: MISMATCH })
-      return
+    try {
+      const frameIndex = await controller.pauseAndSettle()
+      if (get().controller !== controller) return // the video changed meanwhile: that frame is gone
+      if (!controller.verified) {
+        get().showToast({ kind: 'error', text: MISMATCH })
+        return
+      }
+      const r = await window.fc.execute({ type: 'captureFrame', frameIndex, useSelection })
+      if (!r.ok) {
+        get().showToast({ kind: r.reason === 'duplicate' || r.reason === 'no-selection' ? 'info' : 'error', text: r.message })
+        return
+      }
+      // main pushes the new state before it answers, so the frame is already in app.project.frames
+      if (r.frameId) set({ selectedFrameId: r.frameId })
+    } catch (e) {
+      get().showToast({ kind: 'error', text: `Không chụp được frame: ${errText(e)}` })
     }
-    const r = await window.fc.execute({ type: 'captureFrame', frameIndex, useSelection })
-    if (!r.ok) {
-      get().showToast({ kind: r.reason === 'duplicate' || r.reason === 'no-selection' ? 'info' : 'error', text: r.message })
-      return
-    }
-    // main pushes the new state before it answers, so the frame is already in app.project.frames
-    if (r.frameId) set({ selectedFrameId: r.frameId })
   },
 
   async deleteSelectedFrame() {
     const id = get().selectedFrameId
     if (!id) return
-    const r = await window.fc.execute({ type: 'deleteFrame', id })
-    if (r.ok) {
-      if (get().selectedFrameId === id) set({ selectedFrameId: null })
-    } else get().showToast({ kind: 'error', text: r.message })
+    try {
+      const r = await window.fc.execute({ type: 'deleteFrame', id })
+      if (r.ok) {
+        if (get().selectedFrameId === id) set({ selectedFrameId: null })
+      } else get().showToast({ kind: 'error', text: r.message })
+    } catch (e) {
+      get().showToast({ kind: 'error', text: `Không xóa được frame: ${errText(e)}` })
+    }
   },
 
   runAction(a) {
     switch (a.kind) {
       case 'playback':
-        void get().controller?.execute(a.cmd)
+        get()
+          .controller?.execute(a.cmd)
+          .catch((e: unknown) => get().showToast({ kind: 'error', text: `Lỗi trình phát: ${errText(e)}` }))
         return
       case 'capture':
         void get().capture(a.useSelection)

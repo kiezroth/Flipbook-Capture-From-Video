@@ -23,6 +23,13 @@ export class FrameMismatchError extends Error {
   }
 }
 
+/** ffmpeg ran and exited with an error; `stderr` is its log. */
+class FfmpegExitError extends Error {
+  constructor(public stderr: string, message: string) {
+    super(message)
+  }
+}
+
 function runFfmpeg(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const file = ffmpegPaths().ffmpeg
@@ -32,7 +39,7 @@ function runFfmpeg(args: string[]): Promise<string> {
         const code = (err as NodeJS.ErrnoException).code
         if (code === 'ENOENT' || code === 'EACCES') {
           reject(new Error(`Không chạy được ffmpeg (${file}): ${err.message}`))
-        } else reject(new Error(`ffmpeg lỗi: ${stderr.trim() || err.message}`))
+        } else reject(new FfmpegExitError(stderr, `ffmpeg lỗi: ${stderr.trim() || err.message}`))
       } else resolve(stderr)
     })
   })
@@ -60,10 +67,17 @@ export async function extractFrame(
   }
   const tmp = `${outPng}.tmp-${randomBytes(6).toString('hex')}.png`
   try {
-    const log = await runFfmpeg([
-      '-v', 'info', '-hide_banner', '-copyts', '-ss', num(seek), '-i', ffmpegInput(src),
-      '-vf', vf, '-frames:v', '1', '-y', tmp
-    ])
+    let log: string
+    try {
+      log = await runFfmpeg([
+        '-v', 'info', '-hide_banner', '-copyts', '-ss', num(seek), '-i', ffmpegInput(src),
+        '-vf', vf, '-frames:v', '1', '-y', tmp
+      ])
+    } catch (e) {
+      // ffmpeg failed before any frame went through the filters: no frame was produced for this pts
+      if (e instanceof FfmpegExitError && !/pts_time:/.test(e.stderr)) throw new FrameMismatchError(ptsSec, null)
+      throw e
+    }
     // showinfo can print more than one line even with -frames:v 1; the first one is the frame written
     const m = /pts_time:\s*(-?[\d.]+)/.exec(log)
     const got = m ? Number(m[1]) : null

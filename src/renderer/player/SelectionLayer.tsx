@@ -1,6 +1,7 @@
 import { useRef, useState, type PointerEvent } from 'react'
 
 import type { Rect, VideoInfo } from '@core/types'
+import { useStore } from '../store'
 
 /** The picture's box inside the stage, in CSS pixels. */
 export interface Box {
@@ -61,7 +62,11 @@ export function SelectionLayer({ box, info, selection }: Props) {
     start.current = null
     setDraft(null)
     const rect = rectFrom(a, toVideo(e))
-    if (rect.w >= MIN_SIZE && rect.h >= MIN_SIZE) void window.fc.execute({ type: 'setSelection', rect })
+    if (rect.w < MIN_SIZE || rect.h < MIN_SIZE) return
+    window.fc.execute({ type: 'setSelection', rect }).catch((err: unknown) => {
+      const text = `Không đặt được vùng chọn: ${err instanceof Error ? err.message : String(err)}`
+      useStore.getState().showToast({ kind: 'error', text })
+    })
   }
 
   const shown = draft ?? selection

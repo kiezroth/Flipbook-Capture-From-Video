@@ -24,8 +24,12 @@ function Btn(props: { onClick(): void; children: ReactNode }) {
 }
 
 async function run(cmd: Parameters<typeof window.fc.execute>[0]): Promise<void> {
-  const r = await window.fc.execute(cmd)
-  if (!r.ok) useStore.getState().showToast({ kind: 'error', text: r.message })
+  try {
+    const r = await window.fc.execute(cmd)
+    if (!r.ok) useStore.getState().showToast({ kind: 'error', text: r.message })
+  } catch (e) {
+    useStore.getState().showToast({ kind: 'error', text: `Không thực hiện được: ${e instanceof Error ? e.message : String(e)}` })
+  }
 }
 
 /** The frame viewer (right pane): the selected frame, cropped, with its export label, and its actions. */
