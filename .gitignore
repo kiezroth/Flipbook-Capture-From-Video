@@ -1,0 +1,8 @@
+.superpowers/
+node_modules/
+out/
+dist/
+vendor/
+test/fixtures/gen/
+test-results/
+playwright-report/
