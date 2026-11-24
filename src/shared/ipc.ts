@@ -40,6 +40,8 @@ export interface FcApi {
   onMenu(cb: (m: MenuEvent) => void): () => void
   onToast(cb: (t: Toast) => void): () => void
   exportFlipbook(s: ExportSettings): Promise<ExportResponse>
+  /** Folder picker for the export dialog; null when cancelled. */
+  pickExportDir(current: string | null): Promise<string | null>
   cancelBusy(): void
   reportVideoError(): void
   /** The player's speed changed (on-screen buttons): main checks the matching View menu item. */
@@ -51,6 +53,7 @@ export const IPC = {
   getState: 'fc:getState', // invoke
   execute: 'fc:execute', // invoke
   exportFlipbook: 'fc:exportFlipbook', // invoke
+  pickExportDir: 'fc:pickExportDir', // invoke
   undo: 'fc:undo', // send
   redo: 'fc:redo', // send
   cancelBusy: 'fc:cancelBusy', // send

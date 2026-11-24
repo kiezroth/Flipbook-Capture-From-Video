@@ -19,6 +19,7 @@ const api: FcApi = {
   onMenu: (cb) => on(IPC.menu, cb),
   onToast: (cb) => on(IPC.toast, cb),
   exportFlipbook: (s) => ipcRenderer.invoke(IPC.exportFlipbook, s),
+  pickExportDir: (current) => ipcRenderer.invoke(IPC.pickExportDir, current),
   cancelBusy: () => ipcRenderer.send(IPC.cancelBusy),
   reportVideoError: () => ipcRenderer.send(IPC.reportVideoError),
   reportSpeed: (speed) => ipcRenderer.send(IPC.reportSpeed, speed)

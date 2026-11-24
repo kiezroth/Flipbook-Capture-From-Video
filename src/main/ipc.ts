@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 
 import type { ExportSettings } from '../core/types'
 import type { DocCommand, PlaybackCommand } from '../shared/commands'
@@ -24,6 +24,13 @@ export function registerIpc(session: ProjectSession, win: () => BrowserWindow | 
       defaultOutDir: process.env.FC_E2E_OUT_DIR || undefined
     })
   )
+  ipcMain.handle(IPC.pickExportDir, async (_e, current: string | null) => {
+    if (process.env.FC_E2E) return process.env.FC_E2E_OUT_DIR || null
+    const w = win()
+    const opts = { title: 'Chọn thư mục xuất', defaultPath: current ?? undefined, properties: ['openDirectory' as const, 'createDirectory' as const] }
+    const r = await (w ? dialog.showOpenDialog(w, opts) : dialog.showOpenDialog(opts))
+    return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]
+  })
   ipcMain.on(IPC.undo, () => toastOnError(session, session.undo()))
   ipcMain.on(IPC.redo, () => toastOnError(session, session.redo()))
   ipcMain.on(IPC.cancelBusy, () => session.cancelBusy())
