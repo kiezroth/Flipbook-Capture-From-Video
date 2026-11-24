@@ -11,7 +11,7 @@ import type { CommandResult, DocCommand } from '../shared/commands'
 import type { BusyState, ExportResponse, RendererState, Toast } from '../shared/ipc'
 import { ProjectDocument } from './document'
 import { extractFrame } from './ffmpeg/extract'
-import { needsProxy, probeVideo, readPtsTable } from './ffmpeg/probe'
+import { needsProxy, probeVideoWithPts } from './ffmpeg/probe'
 import { makeProxy, proxyCachePath, proxyKeyForFile, proxyKeyForZipEntry } from './ffmpeg/proxy'
 import { closeVideoStreams, VIDEO_SCHEME, type MediaState } from './media-protocol'
 import { Workspace, type SessionMeta } from './workspace'
@@ -312,8 +312,7 @@ export class ProjectSession extends EventEmitter {
   }
 
   private async probe(source: VideoSource): Promise<{ info: VideoInfo; pts: number[] }> {
-    const info = await probeVideo(source)
-    const pts = await readPtsTable(source)
+    const { info, pts } = await probeVideoWithPts(source)
     if (pts.length === 0) throw new Error('Video không có frame nào.')
     return { info, pts }
   }

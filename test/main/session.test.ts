@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -15,7 +16,15 @@ vi.mock('../../src/core/fbproj', async (orig) => {
   const m = await orig<typeof import('../../src/core/fbproj')>()
   return { ...m, writeFbproj: vi.fn(m.writeFbproj) }
 })
+// pass-through spy: counts ffprobe packet scans (the PTS table read)
+vi.mock('node:child_process', async (orig) => {
+  const m = await orig<typeof import('node:child_process')>()
+  return { ...m, execFile: vi.fn(m.execFile) }
+})
 vi.setConfig({ testTimeout: 60_000 })
+
+const packetScans = (): number =>
+  vi.mocked(execFile).mock.calls.filter((c) => (c[1] as string[] | undefined)?.some((a) => a.startsWith('packet='))).length
 
 const capture36: DocCommand = { type: 'captureFrame', frameIndex: 36, useSelection: false }
 
@@ -99,6 +108,20 @@ test('save, reopen, save over the open file while its video stream is open', asy
   expect(Buffer.concat(chunks).equals(readFileSync(FIXTURES.cfr30))).toBe(true)
   expect((await s.doc!.execute({ type: 'captureFrame', frameIndex: 40, useSelection: false })).ok).toBe(true)
   expect(readdirSync(tmp).filter((n) => n.includes('.tmp') || n.includes('.saving'))).toEqual([])
+})
+
+test('import and open scan the packets once each', async () => {
+  const before = packetScans()
+  await s.importVideo(FIXTURES.cfr30)
+  expect(s.rendererState().video!.pts).toHaveLength(90)
+  expect(packetScans() - before).toBe(1)
+  await s.doc!.execute(capture36)
+  pickSave.mockResolvedValue(join(tmp, 'scan.fbproj'))
+  expect(await s.save()).toBe(true)
+  const afterSave = packetScans()
+  await s.open(join(tmp, 'scan.fbproj'))
+  expect(s.rendererState().video!.pts).toHaveLength(90)
+  expect(packetScans() - afterSave).toBe(1)
 })
 
 test('first save switches the source to the saved file and records the session meta', async () => {

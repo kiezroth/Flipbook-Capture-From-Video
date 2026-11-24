@@ -76,7 +76,8 @@ export async function readPtsTable(src: VideoSource): Promise<number[]> {
   return parsePtsTable(out)
 }
 
-export async function probeVideo(src: VideoSource): Promise<VideoInfo> {
+/** Stream info and the PTS table, which the info's frameCount and isVfr are computed from (one packet scan). */
+export async function probeVideoWithPts(src: VideoSource): Promise<{ info: VideoInfo; pts: number[] }> {
   let raw: string
   try {
     raw = await run(ffmpegPaths().ffprobe, ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', '-i', ffmpegInput(src)])
@@ -97,7 +98,7 @@ export async function probeVideo(src: VideoSource): Promise<VideoInfo> {
   }
   const fps = rate(s.avg_frame_rate)
   const fileName = src.kind === 'file' ? basename(src.path) : src.fileName
-  return {
+  const info: VideoInfo = {
     fileName,
     codec: s.codec_name ?? '',
     width: (swap ? s.height : s.width) ?? 0,
@@ -109,6 +110,11 @@ export async function probeVideo(src: VideoSource): Promise<VideoInfo> {
     frameCount: pts.length,
     startTimeSec: Number(json.format?.start_time ?? 0)
   }
+  return { info, pts }
+}
+
+export async function probeVideo(src: VideoSource): Promise<VideoInfo> {
+  return (await probeVideoWithPts(src)).info
 }
 
 export function needsProxy(info: VideoInfo): boolean {
