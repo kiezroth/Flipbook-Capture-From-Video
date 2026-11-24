@@ -54,12 +54,13 @@ export function toForm(s: ExportSettings, video: VideoInfo | null): FormValues {
   }
 }
 
+// 8192: a page is one canvas in main; a 16384x16384 RGBA canvas is ~1 GB and can crash the app.
 const RANGES: Record<NumberField, [min: number, max: number]> = {
-  cellW: [1, 16384],
-  cellH: [1, 16384],
+  cellW: [1, 8192],
+  cellH: [1, 8192],
   columns: [1, 1000],
   gap: [0, 1000],
-  maxLongEdge: [1, 16384],
+  maxLongEdge: [1, 8192],
   fontSize: [1, 200]
 }
 

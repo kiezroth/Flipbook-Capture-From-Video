@@ -57,3 +57,12 @@ test('opening the form re-locks the cell height to the current video when the as
   expect(toForm({ ...s, keepVideoAspect: false }, portrait).cellH).toBe('144') // not locked: kept as saved
   expect(toForm(s, null).cellH).toBe('144') // no video: nothing to lock to
 })
+
+test('cell size and max long edge are capped at 8192 (a bigger page canvas can crash the app)', () => {
+  const f = toForm(DEFAULT_EXPORT, null)
+  for (const key of ['cellW', 'cellH', 'maxLongEdge'] as const) {
+    expect(parseForm({ ...f, [key]: '8192' }).errors[key]).toBeUndefined()
+    expect(parseForm({ ...f, [key]: '8193' }).errors[key]).toBe('Nhập từ 1 đến 8192.')
+    expect(parseForm({ ...f, [key]: '16384' }).settings).toBeNull()
+  }
+})
