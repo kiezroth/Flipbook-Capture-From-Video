@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 
-import type { Rect } from '@core/types'
+import { fitRect } from '@core/fit'
+import type { ExportSettings, Rect } from '@core/types'
 
 /** Captured PNGs never change (crop is stored as a rectangle and ids are UUIDs), so one decoded image per id. */
 const cache = new Map<string, Promise<HTMLImageElement>>()
@@ -60,4 +61,44 @@ export function FrameCanvas({ image, crop, maxW = Infinity, maxH = Infinity, cla
     ctx.drawImage(image, src.x, src.y, src.w, src.h, 0, 0, c.width, c.height)
   }, [image, src.x, src.y, src.w, src.h, maxW, maxH])
   return <canvas ref={ref} className={className} style={style} />
+}
+
+interface CellProps {
+  image: HTMLImageElement
+  /** Part of the image that is the picture (captured-image pixels); null = the whole image. */
+  crop: Rect | null
+  /** The export cell (export pixels) and how the picture is placed in it. */
+  cellW: number
+  cellH: number
+  fit: ExportSettings['fit']
+  /** Displayed size of the cell, CSS pixels. */
+  width: number
+  height: number
+  className?: string
+}
+
+/**
+ * The (cropped) picture placed in an export cell exactly as export places it (`fitRect`, black cell background),
+ * drawn at the displayed size.
+ */
+export function CellCanvas({ image, crop, cellW, cellH, fit, width, height, className }: CellProps) {
+  const ref = useRef<HTMLCanvasElement>(null)
+  const src = crop ?? { x: 0, y: 0, w: image.naturalWidth, h: image.naturalHeight }
+  useLayoutEffect(() => {
+    const c = ref.current!
+    const dpr = window.devicePixelRatio
+    c.width = Math.max(1, Math.round(width * dpr))
+    c.height = Math.max(1, Math.round(height * dpr))
+    const ctx = c.getContext('2d')!
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.fillStyle = '#000'
+    ctx.fillRect(0, 0, c.width, c.height)
+    const r = fitRect(src.w, src.h, { x: 0, y: 0, w: cellW, h: cellH }, fit)
+    if (!r) return
+    // export-cell pixels → canvas pixels
+    ctx.setTransform(c.width / cellW, 0, 0, c.height / cellH, 0, 0)
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(image, src.x + r.src.x, src.y + r.src.y, r.src.w, r.src.h, r.dst.x, r.dst.y, r.dst.w, r.dst.h)
+  }, [image, src.x, src.y, src.w, src.h, cellW, cellH, fit, width, height])
+  return <canvas ref={ref} className={className} />
 }

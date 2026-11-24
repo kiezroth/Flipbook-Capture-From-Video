@@ -9,7 +9,7 @@ import { containBox } from '../player/Player'
 import type { Box } from '../player/SelectionLayer'
 import { playback, useStore } from '../store'
 import { CropBox, cropFor } from './CropBox'
-import { FrameCanvas, useFrameImage } from './frameImage'
+import { CellCanvas, useFrameImage } from './frameImage'
 import { LabelOverlay } from './LabelOverlay'
 
 // Buttons never take focus: Space, the arrows, T and Delete stay with the app shortcuts.
@@ -32,7 +32,7 @@ async function run(cmd: Parameters<typeof window.fc.execute>[0]): Promise<void> 
   }
 }
 
-/** The frame viewer (right pane): the selected frame, cropped, with its export label, and its actions. */
+/** The frame viewer (right pane): the selected frame as its export cell (crop, fit, label), and its actions. */
 export function FrameViewer() {
   const frames = useStore((s) => s.app?.project?.frames)
   const settings = useStore((s) => s.app?.project?.exportSettings ?? DEFAULT_EXPORT)
@@ -113,12 +113,21 @@ function ViewerBody({ frame, labelMs, settings }: { frame: NumberedFrame; labelM
     const box = containBox(stage.w, stage.h, image.naturalWidth, image.naturalHeight)
     content = <CropBox image={image} box={box} rect={draft} onRect={setDraft} />
   } else if (image) {
-    const src = frame.crop ?? { w: image.naturalWidth, h: image.naturalHeight }
-    const box: Box = containBox(stage.w, stage.h, src.w, src.h)
+    // a preview of the export cell: same size ratio, picture fitting, black background and label as the export
+    const box: Box = containBox(stage.w, stage.h, settings.cellW, settings.cellH)
     content = (
-      <div className="viewer-image" data-testid="viewer-image" style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>
-        <FrameCanvas image={image} crop={frame.crop} className="fill" />
-        <LabelOverlay lines={lines} fontSize={settings.fontSize} scale={box.width / settings.cellW} />
+      <div className="viewer-cell" data-testid="viewer-cell" style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>
+        <CellCanvas
+          image={image}
+          crop={frame.crop}
+          cellW={settings.cellW}
+          cellH={settings.cellH}
+          fit={settings.fit}
+          width={box.width}
+          height={box.height}
+          className="fill"
+        />
+        <LabelOverlay lines={lines} fontSize={settings.fontSize} cellW={settings.cellW} scale={box.width / settings.cellW} />
       </div>
     )
   }

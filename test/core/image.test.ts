@@ -1,6 +1,6 @@
 import { beforeAll, expect, test } from 'vitest'
 import { createCanvas, loadImage } from '@napi-rs/canvas'
-import { cropImage, drawFitted, resizeToMax } from '../../src/core/image'
+import { cropImage, drawFitted, drawLabel, resizeToMax } from '../../src/core/image'
 
 const solid = (w: number, h: number, color = '#808080'): Buffer => {
   const c = createCanvas(w, h)
@@ -45,4 +45,35 @@ test('drawFitted contain / cover / stretch', async () => {
   // cover and stretch fill the whole cell
   expect(alpha('cover', 50, 2)).toBeGreaterThan(100)
   expect(alpha('stretch', 2, 2)).toBeGreaterThan(100)
+})
+
+test('drawLabel stays inside its cell', () => {
+  const c = createCanvas(300, 60)
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, 300, 60)
+  const cell = { x: 150, y: 0, w: 100, h: 60 }
+  drawLabel(
+    ctx,
+    [
+      { text: '12', bold: true },
+      { text: `${'w'.repeat(60)}-12`, bold: false, fitSuffix: '-12' },
+      { text: '420ms', bold: false }
+    ],
+    cell,
+    14
+  )
+  const d = ctx.getImageData(0, 0, 300, 60).data
+  const outside: [number, number][] = []
+  let inside = 0
+  for (let y = 0; y < 60; y++) {
+    for (let x = 0; x < 300; x++) {
+      const i = (y * 300 + x) * 4
+      const lit = d[i] + d[i + 1] + d[i + 2] > 0
+      if (x >= cell.x && x < cell.x + cell.w) inside += lit ? 1 : 0
+      else if (lit) outside.push([x, y])
+    }
+  }
+  expect(outside).toEqual([])
+  expect(inside).toBeGreaterThan(0)
 })

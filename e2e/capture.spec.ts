@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { createCanvas, loadImage } from '@napi-rs/canvas'
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 
 import type { RendererState } from '../src/shared/ipc'
@@ -140,13 +141,40 @@ test('rename, crop, delete, undo, redo, goto', async () => {
   expect(crop.y).toBe(0)
   expect(Math.abs(crop.x + crop.w - 640)).toBeLessThanOrEqual(0)
   expect(Math.abs(crop.h - 180)).toBeLessThanOrEqual(2)
-  // the viewer shows the cropped image, label still in its top-right corner
-  const img = (await win.getByTestId('viewer-image').boundingBox())!
-  expect(Math.abs(img.width / img.height - crop.w / crop.h)).toBeLessThan(0.02)
+  // the viewer shows the export cell (256x256 by default): the cropped picture contain-fitted in black, the label in
+  // the cell's top-right corner at the cell's scale
+  const cell = (await win.getByTestId('viewer-cell').boundingBox())!
+  expect(Math.abs(cell.width / cell.height - 1)).toBeLessThan(0.01)
   const label = (await win.getByTestId('viewer-label').boundingBox())!
-  expect(Math.abs(label.x + label.width - (img.x + img.width))).toBeLessThan(1.5)
-  expect(Math.abs(label.y - img.y)).toBeLessThan(1.5)
-  expect(label.width).toBeLessThan(img.width / 2)
+  expect(Math.abs(label.x + label.width - (cell.x + cell.width))).toBeLessThan(1.5)
+  expect(Math.abs(label.y - cell.y)).toBeLessThan(1.5)
+  expect(label.width).toBeLessThan(cell.width / 2)
+  const scale = cell.width / 256
+  expect(Math.abs(label.height - (3 * 18 + 8) * scale)).toBeLessThan(1.5) // 3 lines of round(1.25*14) + 2*4 padding
+  // contain: the 2:1 crop leaves black bars above and below the picture (rows 0..63 and 192..255 of the cell)
+  // (the frame canvas is tainted for getImageData, so read a screenshot of the cell)
+  const shot = await loadImage(await win.getByTestId('viewer-cell').screenshot())
+  const shotCtx = createCanvas(shot.width, shot.height).getContext('2d')
+  shotCtx.drawImage(shot, 0, 0)
+  const lumaAt = (fx: number, fy: number): number => {
+    const d = shotCtx.getImageData(Math.floor(shot.width * fx), Math.floor(shot.height * fy), 1, 1).data
+    return 0.299 * d[0] + 0.587 * d[1] + 0.114 * d[2]
+  }
+  expect(lumaAt(0.1, 0.1)).toBeLessThan(5)
+  expect(lumaAt(0.1, 0.9)).toBeLessThan(5)
+  expect(lumaAt(0.5, 0.65)).toBeGreaterThan(30) // the gray part of the picture (its top half is the black bit band)
+
+  // a long name is shortened in the viewer as in the export and the label stays inside the cell
+  await win.getByRole('button', { name: 'Đặt tên' }).click()
+  await win.getByTestId('name-input').fill('n'.repeat(60))
+  await win.keyboard.press('Enter')
+  await expect(win.getByTestId('viewer-label')).toHaveAttribute('aria-label', /^1 n+…-1 0ms$/)
+  const long = (await win.getByTestId('viewer-label').boundingBox())!
+  expect(long.width).toBeLessThanOrEqual(cell.width + 0.5)
+  await win.getByRole('button', { name: 'Đặt tên' }).click()
+  await win.getByTestId('name-input').fill('slash')
+  await win.keyboard.press('Enter')
+  await expect(win.getByTestId('viewer-label')).toHaveAttribute('aria-label', '1 slash-1 0ms')
 
   // crop again, then "Bỏ crop" removes it
   await win.getByRole('button', { name: 'Crop', exact: true }).click()

@@ -193,9 +193,15 @@ button.active {
   display: flex;
 }
 
-.viewer-image,
+.viewer-cell,
 .crop-layer {
   position: absolute;
+}
+
+/* as an export cell: nothing (label included) is drawn outside it */
+.viewer-cell {
+  overflow: hidden;
+  background: #000;
 }
 
 .fill {

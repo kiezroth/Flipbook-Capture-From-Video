@@ -73,3 +73,19 @@ test('cell larger than max edge → error, nothing written', async () => {
   await expect(p).rejects.toMatchObject({ layoutError: { error: 'cell-too-large' } })
   expect(readdirSync(req.outDir)).toEqual([])
 })
+
+test('a long name never spills into the neighbouring cell', async () => {
+  const settings = { ...DEFAULT_EXPORT, cellW: 128, cellH: 72, columns: 2 as const }
+  const frames = (name: string): FrameRecord[] => mk(2, 33).map((f, i) => (i === 1 ? { ...f, baseName: name } : f))
+  const short = await exportFlipbook({ ...req, settings, frames: frames('ab'), fileName: 'short' })
+  const long = await exportFlipbook({ ...req, settings, frames: frames('x'.repeat(60)), fileName: 'long' })
+  const pixels = async (file: string): Promise<Uint8ClampedArray> => {
+    const img = await loadImage(file)
+    const c = createCanvas(img.width, img.height)
+    const ctx = c.getContext('2d')
+    ctx.drawImage(img, 0, 0)
+    // the first cell (with its label) and the gap up to the second cell
+    return ctx.getImageData(0, 0, 128 + settings.gap, 72).data
+  }
+  expect(Buffer.from(await pixels(long.pages[0])).equals(Buffer.from(await pixels(short.pages[0])))).toBe(true)
+})
