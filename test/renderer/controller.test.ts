@@ -18,6 +18,8 @@ class FakeVideo extends EventTarget {
   shown = -1
   seeks: number[] = []
   rvfcBroken = false
+  /** Seeks never complete (no `seeked`, no presentation). */
+  stuck = false
   land: (natural: number) => number = (n) => n
   private mt: number[] = []
   private _src = ''
@@ -64,6 +66,7 @@ class FakeVideo extends EventTarget {
     this.t = t
     this.seeks.push(t)
     const k = this.land(this.frameAt(t))
+    if (this.stuck) return
     setTimeout(() => {
       if (k !== this.shown) this.present(k)
       this.dispatchEvent(new Event('seeked'))
@@ -159,6 +162,35 @@ test('a seek to the frame already on screen does not wait for the rVFC timeout',
   await c.pauseAndSettle()
   expect(Date.now() - t0).toBeLessThan(700)
   expect([c.displayedIndex, v.shown, c.verified]).toEqual([v.shown, c.displayedIndex, true])
+})
+
+test('a failed first calibration settles unverified, refuses to play and keeps steps on the frame shown', async () => {
+  const { v, c } = make(cfr, 1.5, { seekTimeoutMs: 200 })
+  v.stuck = true
+  await c.load('u')
+  expect(c.status).toMatchObject({ loading: false, settled: true, verified: false, displayedIndex: 0 })
+  const seeks = v.seeks.length
+  await c.execute({ type: 'stepFrame', delta: 5 })
+  expect(c.status).toMatchObject({ settled: true, verified: false, displayedIndex: 0 })
+  expect(c.targetIndex).toBe(0)
+  expect(v.seeks.length).toBe(seeks)
+  await c.execute({ type: 'togglePlay' })
+  expect([c.status.playing, v.paused]).toEqual([false, true])
+})
+
+test('a reload forgets the previous offset: a failed re-calibration cannot play or verify', async () => {
+  const { v, c } = make(cfr, 1.5, { seekTimeoutMs: 200 })
+  await c.load('a')
+  await c.execute({ type: 'stepFrame', delta: 8 })
+  expect(c.verified).toBe(true)
+  v.stuck = true
+  await c.load('b')
+  expect(c.status).toMatchObject({ loading: false, settled: true, verified: false })
+  await c.execute({ type: 'togglePlay' })
+  expect([c.status.playing, v.paused]).toEqual([false, true])
+  v.stuck = false
+  await c.load('c') // a later load calibrates again and returns to the frame
+  expect([c.displayedIndex, v.shown, c.verified]).toEqual([8, 8, true])
 })
 
 test('rapid steps coalesce onto the newest target', async () => {

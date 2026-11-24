@@ -166,6 +166,9 @@ export class PlayerController {
     this.draining = false
     this._playing = false
     this.lastMedia = null
+    // the previous load's offset says nothing about this media
+    this.calibrated = false
+    this.offsetTrusted = false
     this._loading = true
     this._verified = false
     this.video.src = url
@@ -179,9 +182,7 @@ export class PlayerController {
       await this.measureOffset(gen)
     })
       .then(() => (gen === this.gen ? this.settle() : undefined))
-      .catch(() => {
-        if (gen === this.gen) this._verified = false
-      })
+      .catch(() => this.calibrationFailed(gen))
       .finally(() => {
         if (gen !== this.gen) return
         this._loading = false
@@ -195,7 +196,10 @@ export class PlayerController {
   /** Measures offsetSec (pts[0] − mediaTime of the first frame), then returns to targetIndex. */
   calibrate(): Promise<void> {
     const gen = this.gen
-    return this.enqueue(() => this.measureOffset(gen)).then(() => this.settle())
+    return this.enqueue(() => this.measureOffset(gen)).then(
+      () => this.settle(),
+      () => this.calibrationFailed(gen)
+    )
   }
 
   async execute(cmd: PlaybackCommand): Promise<void> {
@@ -253,6 +257,20 @@ export class PlayerController {
 
   // ------------------------------------------------------------------------------------------------------- internals
 
+  /**
+   * Without an offset nothing can be sought or verified: the player settles unverified (the mismatch hint shows,
+   * capture is blocked), refuses to play, and steps stay on the frame shown until a load calibrates again.
+   */
+  private calibrationFailed(gen: number): void {
+    if (gen !== this.gen) return
+    this.calibrated = false
+    this.offsetTrusted = false
+    this._verified = false
+    this.needsVerify = false
+    this._target = this._displayed
+    this.emit()
+  }
+
   private idle(): boolean {
     return (
       !this._playing &&
@@ -305,6 +323,11 @@ export class PlayerController {
   private async settleLoop(): Promise<void> {
     const gen = this.gen
     for (;;) {
+      if (gen === this.gen && !this.calibrated && !this._loading) {
+        // calibration failed: stay on the frame shown, unverified
+        this._target = this._displayed
+        this.needsVerify = false
+      }
       const target = this._target
       if (gen !== this.gen || this.disposed || !this.calibrated || this._playing || (target === this._displayed && !this.needsVerify)) {
         this.settleJob = null
@@ -336,6 +359,12 @@ export class PlayerController {
     this.emit()
     return this.enqueue(async () => {
       if (!this._playing || this.disposed) return
+      if (!this.calibrated) {
+        // no offset (calibration failed): frames could not be mapped, so do not play
+        this._playing = false
+        this.emit()
+        return
+      }
       if (this._displayed >= this.pts.length - 1) {
         // at the end: start over from the first frame
         const r = await this.seekIndex(0)
