@@ -1,0 +1,26 @@
+appId: dev.kiezroth.flipbookcapture
+productName: Flipbook Capture
+directories:
+  output: dist
+files:
+  - out/main/**
+  - out/preload/**
+  - out/renderer/**
+  - package.json
+# The MCP server runs from the app's own exe in Node mode, so it ships as a plain file next to the exe, not inside the asar.
+extraResources:
+  - from: vendor/ffmpeg
+    to: ffmpeg
+  - from: out/mcp/server.cjs
+    to: mcp/server.cjs
+# The native canvas addon (and its platform package) cannot be loaded from inside an asar.
+asarUnpack:
+  - node_modules/@napi-rs/**
+win:
+  target:
+    - target: nsis
+      arch: x64
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
