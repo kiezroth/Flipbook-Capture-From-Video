@@ -375,16 +375,27 @@ export class PlayerController {
     void this.settle()
   }
 
-  /** Persistent rVFC watcher: records each presented frame; while playing (or draining a pause) it is the display. */
+  /**
+   * Persistent rVFC watcher: records each presented frame. While playing (or draining a pause) it is the display.
+   * While paused with no seek running, a presented frame that differs from displayedIndex (a late presentation after
+   * a seek was resolved) is shown, verified drops, and the target is sought again.
+   */
   private readonly onFrame = (_now: number, meta: VideoFrameCallbackMetadata): void => {
     if (this.disposed) return
     this.watchHandle = this.video.requestVideoFrameCallback(this.onFrame)
     this.presented++
     this.lastMedia = meta.mediaTime
-    if ((this._playing || this.draining) && this.calibrated && !this._loading) {
+    if (this.calibrated && !this._loading) {
       const i = nearestFrameIndex(this.pts, meta.mediaTime + this.offsetSec)
-      this._target = i
-      this.show(i)
+      if (this._playing || this.draining) {
+        this._target = i
+        this.show(i)
+      } else if (this.presentHook === null && i !== this._displayed) {
+        this._verified = false
+        this.needsVerify = true
+        this.show(i)
+        void this.settle()
+      }
     }
     this.presentHook?.()
   }

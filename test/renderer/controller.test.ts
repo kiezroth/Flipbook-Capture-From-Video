@@ -108,6 +108,11 @@ class FakeVideo extends EventTarget {
     this.timer = null
   }
 
+  /** A presentation outside any seek, e.g. a frame that reaches the screen late. */
+  presentNow(k: number): void {
+    this.present(k)
+  }
+
   private present(k: number): void {
     this.shown = k
     if (this.rvfcBroken) return
@@ -182,6 +187,19 @@ test('steps on a VFR table follow the PTS table', async () => {
   const limit = (vfr[7] - vfr[0]) * 1000 + 100
   const expected = vfr.filter((p) => (p - vfr[0]) * 1000 <= limit).length - 1
   expect([c.displayedIndex, v.shown]).toEqual([expected, expected])
+})
+
+test('a frame presented late while paused is shown, unverifies, and the target is sought again', async () => {
+  const { v, c } = make(cfr, 1.5)
+  await c.load('u')
+  await c.execute({ type: 'stepFrame', delta: 10 })
+  expect([c.displayedIndex, v.shown, c.verified]).toEqual([10, 10, true])
+  const seen: PlayerStatus[] = []
+  c.onChange((s) => seen.push(s))
+  v.presentNow(11) // the screen changes after the seek was resolved
+  expect(seen.some((s) => s.displayedIndex === 11 && !s.verified && !s.settled)).toBe(true)
+  await c.pauseAndSettle()
+  expect([c.displayedIndex, v.shown, c.verified, c.status.settled]).toEqual([10, 10, true, true])
 })
 
 test('a seek that lands wrong once is re-seeked and verified', async () => {
