@@ -36,6 +36,8 @@ test.afterAll(async () => {
 })
 
 test.afterEach(async () => {
+  // the hint only shows once settled: wait for that, or the check would pass trivially
+  await expect(win.locator('[data-testid="player"][data-settled="true"]')).toBeVisible()
   await expect(win.getByTestId('mismatch')).toHaveCount(0)
 })
 
