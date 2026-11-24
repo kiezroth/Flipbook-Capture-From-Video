@@ -89,3 +89,12 @@ export async function capturedPng(app: ElectronApplication, i: number): Promise<
 export function pngSize(png: Buffer): [number, number] {
   return [png.readUInt32BE(16), png.readUInt32BE(20)]
 }
+
+/** Captures `count` frames `step` frames apart, starting at the frame on screen (T after each stop). */
+export async function captureEvery(win: Page, step: number, count: number): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    if (i > 0) for (let k = 0; k < step; k++) await win.keyboard.press('.')
+    await win.keyboard.press('t')
+    await expect(win.getByTestId('strip-item')).toHaveCount(i + 1)
+  }
+}

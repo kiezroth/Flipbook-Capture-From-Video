@@ -21,12 +21,17 @@ export interface Store {
   toast: Toast | null
   /** Bumped by every showToast, so the same text shown twice restarts the toast's timer. */
   toastId: number
+  /** The Export Flipbook dialog is open. */
+  exportOpen: boolean
 
   setAppState(s: RendererState): void
   selectFrame(id: string | null): void
   setController(c: PlayerController | null): void
   setPlayer(s: PlayerStatus): void
   showToast(t: Toast | null): void
+  /** Ctrl+E / File > Export Flipbook: opens the dialog, or a toast when there is nothing to export. */
+  openExport(): void
+  closeExport(): void
   /**
    * Capture (T / Ctrl+T): pauses on the frame on screen, waits until the player has verified it, then asks main to
    * capture that frame. The new frame becomes the selected one; a refusal (duplicate, no selection, mismatch) is a toast.
@@ -64,6 +69,7 @@ export const useStore = create<Store>()((set, get) => ({
   controller: null,
   toast: null,
   toastId: 0,
+  exportOpen: false,
 
   setAppState(s) {
     const prev = get().app?.video ?? null
@@ -87,6 +93,15 @@ export const useStore = create<Store>()((set, get) => ({
   setController: (c) => set({ controller: c }),
   setPlayer: (s) => set({ player: s }),
   showToast: (t) => set((s) => ({ toast: t, toastId: s.toastId + 1 })),
+
+  openExport() {
+    if ((get().app?.project?.frames.length ?? 0) === 0) {
+      get().showToast({ kind: 'info', text: 'Chưa có frame nào để xuất' })
+      return
+    }
+    set({ exportOpen: true })
+  },
+  closeExport: () => set({ exportOpen: false }),
 
   async capture(useSelection) {
     const controller = get().controller

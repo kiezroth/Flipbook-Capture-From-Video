@@ -442,3 +442,89 @@ button.active {
   align-items: center;
   min-height: 24px;
 }
+
+/* Export dialog (under the busy overlay and the toast) */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 5;
+}
+.dialog {
+  width: 520px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  user-select: none;
+}
+.dialog h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.dialog fieldset {
+  border: 1px solid var(--line);
+  margin: 0;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dialog legend {
+  color: var(--muted);
+  padding: 0 4px;
+}
+.dialog .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dialog label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dialog input[type='text'] {
+  width: 76px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 3px 5px;
+  user-select: text;
+}
+.dialog input.wide {
+  width: 100%;
+  flex: 1 1 auto;
+}
+.dialog input[aria-invalid='true'] {
+  border-color: var(--red);
+}
+.dialog .field-error {
+  color: var(--red);
+}
+.dialog .preview {
+  font-weight: 600;
+}
+.dialog .warning {
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  padding: 6px 8px;
+}
+.dialog .error {
+  color: var(--red);
+  border: 1px solid var(--red);
+  padding: 6px 8px;
+}
+.dialog .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
