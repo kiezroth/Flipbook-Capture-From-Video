@@ -9,8 +9,14 @@ files:
   - package.json
 # The MCP server runs from the app's own exe in Node mode, so it ships as a plain file next to the exe, not inside the asar.
 extraResources:
+  # ffmpeg/ffprobe, the DLLs of a shared build and the build's LICENSE/README (scripts/vendor-ffmpeg.ps1 puts them there)
   - from: vendor/ffmpeg
     to: ffmpeg
+    filter:
+      - "*.exe"
+      - "*.dll"
+      - "LICENSE*"
+      - "README*"
   - from: out/mcp/server.cjs
     to: mcp/server.cjs
 # The native canvas addon (and its platform package) cannot be loaded from inside an asar.
