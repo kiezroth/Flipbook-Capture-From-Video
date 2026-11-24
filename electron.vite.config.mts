@@ -1,17 +1,21 @@
 import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
+const root = fileURLToPath(new URL('.', import.meta.url))
+
 const alias = {
-  '@core': resolve(__dirname, 'src/core'),
-  '@shared': resolve(__dirname, 'src/shared')
+  '@core': resolve(root, 'src/core'),
+  '@shared': resolve(root, 'src/shared')
 }
 
 export default defineConfig({
   main: { resolve: { alias } },
   preload: { resolve: { alias } },
   renderer: {
-    root: resolve(__dirname, 'src/renderer'),
+    root: resolve(root, 'src/renderer'),
     resolve: { alias },
     plugins: [react()]
   }

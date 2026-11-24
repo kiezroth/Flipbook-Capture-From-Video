@@ -16,5 +16,5 @@
       "@shared/*": ["./src/shared/*"]
     }
   },
-  "include": ["src", "test", "e2e", "*.ts"]
+  "include": ["src", "test", "e2e", "*.mts"]
 }
