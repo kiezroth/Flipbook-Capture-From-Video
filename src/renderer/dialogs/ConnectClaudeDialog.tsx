@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import type { ConnectInfo } from '@shared/ipc'
-import { claudeAddCommand } from '../../main/connect'
+import { claudeAddCommand } from '@shared/connect'
 import { useStore } from '../store'
 
 /** Help > Kết nối với Claude: the `claude mcp add` command for the read-only MCP server, with editable root folders. */

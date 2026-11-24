@@ -6,7 +6,7 @@ export interface ClaudeAddArgs {
 }
 
 /** Double quotes for the Windows command line; backslashes before the closing quote are doubled so `D:\` stays intact. */
-const quote = (s: string): string => `"${s.replace(/\+$/, (b) => b + b)}"`
+const quote = (s: string): string => `"${s.replace(/\\+$/, (b) => b + b)}"`
 
 /** The `claude mcp add` command that registers the packaged exe (in Node mode) as the read-only MCP server. */
 export function claudeAddCommand(a: ClaudeAddArgs): string {
