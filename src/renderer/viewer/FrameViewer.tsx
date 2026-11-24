@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEve
 import { labelLines } from '@core/labels'
 import { numberFrames, type NumberedFrame } from '@core/ordering'
 import { exportTimes } from '@core/timing'
+import { isCompositionEnter } from '../ime'
 import { DEFAULT_EXPORT, type ExportSettings, type Rect } from '@core/types'
 import { containBox } from '../player/Player'
 import type { Box } from '../player/SelectionLayer'
@@ -148,7 +149,7 @@ function ViewerBody({ frame, labelMs, settings }: { frame: NumberedFrame; labelM
   )
 }
 
-/** Base-name field: Enter saves (empty = back to the number), Esc or leaving the field cancels. */
+/** Base-name field: Enter saves (empty = back to the number), Esc or moving focus to another element cancels. */
 function RenameField({ frame, onDone }: { frame: NumberedFrame; onDone(): void }) {
   const [value, setValue] = useState(frame.baseName ?? '')
   const ref = useRef<HTMLInputElement>(null)
@@ -157,6 +158,7 @@ function RenameField({ frame, onDone }: { frame: NumberedFrame; onDone(): void }
     ref.current!.select()
   }, [])
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
+    if (isCompositionEnter(e)) return // confirms an IME composition (Telex), not the name
     if (e.key === 'Enter') {
       e.preventDefault()
       const name = value.trim()
@@ -177,7 +179,9 @@ function RenameField({ frame, onDone }: { frame: NumberedFrame; onDone(): void }
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={onKeyDown}
-      onBlur={onDone}
+      onBlur={() => {
+        if (document.hasFocus()) onDone() // focus moved within the window; alt-tab keeps the edit
+      }}
     />
   )
 }
