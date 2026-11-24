@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest'
 
 import { ffmpegInput } from '../../src/core/fbproj'
 import { frameMs } from '../../src/core/timing'
+import { ffmpegPaths } from '../../src/main/ffmpeg/paths'
 import { needsProxy, probeVideo, readPtsTable } from '../../src/main/ffmpeg/probe'
 import { decodeIndex } from '../helpers/decodeIndex'
 import { FIXTURES } from '../helpers/fixtures'
@@ -37,16 +38,18 @@ describe('probe', () => {
     await expect(probeVideo({ kind: 'file', path: __filename })).rejects.toThrow(/không phải video|no video stream/i)
   })
   test('ffmpegInput for file and zip entry', () => {
-    expect(ffmpegInput({ kind: 'file', path: 'C:\a b\v.mp4' })).toBe('C:\a b\v.mp4')
-    expect(ffmpegInput({ kind: 'zipEntry', zipPath: 'D:\p.fbproj', start: 100, end: 900, fileName: 'v.mp4' })).toBe(
-      'subfile,,start,100,end,900,,:D:\p.fbproj'
+    const winPath = String.raw`C:\a b\v.mp4`
+    expect(ffmpegInput({ kind: 'file', path: winPath })).toBe(winPath)
+    const zipPath = String.raw`D:\Video hiệu ứng\dự án.fbproj`
+    expect(ffmpegInput({ kind: 'zipEntry', zipPath, start: 100, end: 900, fileName: 'v.mp4' })).toBe(
+      String.raw`subfile,,start,100,end,900,,:D:\Video hiệu ứng\dự án.fbproj`
     )
   })
 })
 
 describe('decodeIndex', () => {
   const frame = (file: string, n: number): Buffer =>
-    execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-vf', `select=eq(n\\,${n})`, '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-'], {
+    execFileSync(ffmpegPaths().ffmpeg, ['-v', 'error', '-i', file, '-vf', `select=eq(n\\,${n})`, '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-'], {
       maxBuffer: 64 * 1024 * 1024
     })
   test('decodes the index of a plain frame', async () => {

@@ -11,7 +11,13 @@ function run(file: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     // execFile = argument array, no shell, so Unicode paths pass through intact
     execFile(file, args, { maxBuffer: 256 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
-      if (err) reject(new Error(`ffprobe lỗi: ${stderr.trim() || err.message}`))
+      if (err) {
+        const code = (err as NodeJS.ErrnoException).code
+        // ENOENT/EACCES: ffprobe itself could not be launched (not an unreadable input)
+        if (code === 'ENOENT' || code === 'EACCES') {
+          reject(Object.assign(new Error(`Không chạy được ffprobe (${file}): ${err.message}`), { spawnFailed: true }))
+        } else reject(new Error(`ffprobe lỗi: ${stderr.trim() || err.message}`))
+      }
       else resolve(stdout)
     })
   })
@@ -65,6 +71,7 @@ export async function probeVideo(src: VideoSource): Promise<VideoInfo> {
   try {
     raw = await run(ffmpegPaths().ffprobe, ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', '-i', ffmpegInput(src)])
   } catch (e) {
+    if ((e as { spawnFailed?: boolean }).spawnFailed) throw e
     throw new Error(`Tệp này không phải video hoặc không đọc được (no video stream). ${(e as Error).message}`)
   }
   const json = JSON.parse(raw) as { streams?: ProbeStream[]; format?: { duration?: string; start_time?: string } }
