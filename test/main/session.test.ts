@@ -14,7 +14,7 @@ import { FIXTURES } from '../helpers/fixtures'
 
 vi.mock('../../src/core/fbproj', async (orig) => {
   const m = await orig<typeof import('../../src/core/fbproj')>()
-  return { ...m, writeFbproj: vi.fn(m.writeFbproj) }
+  return { ...m, writeFbproj: vi.fn(m.writeFbproj), openFbproj: vi.fn(m.openFbproj) }
 })
 // pass-through spy: counts ffprobe packet scans (the PTS table read)
 vi.mock('node:child_process', async (orig) => {
@@ -122,6 +122,57 @@ test('import and open scan the packets once each', async () => {
   await s.open(join(tmp, 'scan.fbproj'))
   expect(s.rendererState().video!.pts).toHaveLength(90)
   expect(packetScans() - afterSave).toBe(1)
+})
+
+/** Makes openFbproj fail for `path` until the returned function is called. */
+function failReopenOf(path: string): () => void {
+  const real = vi.mocked(openFbproj).getMockImplementation()!
+  vi.mocked(openFbproj).mockImplementation(async (p: string) => {
+    if (p === path) throw new Error('EBUSY: file locked')
+    return real(p)
+  })
+  return () => vi.mocked(openFbproj).mockImplementation(real)
+}
+
+test('reopen failing after the rename: saved with a warning, captures keep using the still valid file source', async () => {
+  await s.importVideo(FIXTURES.cfr30)
+  const target = join(tmp, 'reopen.fbproj')
+  pickSave.mockResolvedValue(target)
+  const restore = failReopenOf(target)
+  try {
+    expect(await s.save()).toBe(true)
+  } finally {
+    restore()
+  }
+  expect(toasts.map((t) => t.text).join(' | ')).not.toMatch(/Không lưu được/)
+  expect(toasts.at(-1)!.text).toMatch(/Đã lưu dự án/)
+  expect(s.rendererState()).toMatchObject({ filePath: target, dirty: false, projectName: 'reopen' })
+  expect(existsSync(target)).toBe(true)
+  // the imported file is still a valid source: playing and capturing go on from it
+  expect(s.media().video).toEqual({ kind: 'file', path: FIXTURES.cfr30 })
+  expect((await s.execute(capture36)).ok).toBe(true)
+})
+
+test('reopen failing after a save over the playing file: capture is blocked until the file can be reopened', async () => {
+  await s.importVideo(FIXTURES.cfr30)
+  const target = join(tmp, 'over.fbproj')
+  pickSave.mockResolvedValue(target)
+  expect(await s.save()).toBe(true) // now playing from over.fbproj
+  expect(s.media().video).toMatchObject({ kind: 'zipEntry', zipPath: target })
+  await s.execute({ type: 'setSelection', rect: { x: 0, y: 0, w: 10, h: 10 } })
+  const restore = failReopenOf(target)
+  expect(await s.save()).toBe(true) // renames over the file the video plays from
+  expect(toasts.at(-1)!.text).toMatch(/Đã lưu dự án/)
+  expect(s.rendererState()).toMatchObject({ filePath: target, dirty: false })
+  // the old zip offsets are stale: nothing is served or captured from them
+  expect(s.media().video).toBeNull()
+  const r = await s.execute(capture36)
+  expect(r).toMatchObject({ ok: false, reason: 'no-video' })
+  expect(s.rendererState().project!.frames).toHaveLength(0)
+  // once the file can be opened again, the next capture reopens it and works
+  restore()
+  expect((await s.execute(capture36)).ok).toBe(true)
+  expect(s.media().video).toMatchObject({ kind: 'zipEntry', zipPath: target })
 })
 
 test('first save switches the source to the saved file and records the session meta', async () => {

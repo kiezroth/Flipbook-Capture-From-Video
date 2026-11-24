@@ -43,11 +43,34 @@ interface Loaded {
   proxyPath: string | null
   /** A proxy was already made, cancelled or failed for this video: video errors must not start another one. */
   proxyTried: boolean
+  /**
+   * A save replaced the file `source` pointed into and the saved file could not be reopened: `source` is stale, so
+   * nothing is served or captured from it until reopenSaved succeeds.
+   */
+  sourceLost?: boolean
 }
 
 const mb = (bytes: number): string => (bytes / (1024 * 1024)).toFixed(1)
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 const samePath = (a: string, b: string): boolean => resolve(a).toLowerCase() === resolve(b).toLowerCase()
+
+const SOURCE_LOST =
+  'Chưa thể phát hay chụp video: app sẽ thử mở lại file dự án khi bạn chụp hoặc lưu. Nếu vẫn lỗi, hãy mở lại dự án (File › Open).'
+
+const originOf = (src: VideoSource): SessionMeta['videoOrigin'] =>
+  src.kind === 'file' ? { kind: 'file', path: src.path } : { kind: 'fbproj', path: src.zipPath }
+
+/** Opens a just-written .fbproj; Windows antivirus/indexers may hold a new file for a moment. */
+async function openWithRetry(path: string): Promise<FbprojReader> {
+  for (let i = 0; ; i++) {
+    try {
+      return await openFbproj(path)
+    } catch (e) {
+      if (i >= 2) throw e
+      await new Promise((r) => setTimeout(r, 200))
+    }
+  }
+}
 
 async function renameWithRetry(from: string, to: string): Promise<void> {
   for (let i = 0; ; i++) {
@@ -96,7 +119,7 @@ export class ProjectSession extends EventEmitter {
   media(): MediaState {
     const L = this.loaded
     return {
-      video: L && !this.releasing ? L.source : null,
+      video: L && !this.releasing && !L.sourceLost ? L.source : null,
       proxyPath: L && !this.releasing ? L.proxyPath : null,
       framesDir: L ? L.workspace.framesDir : null
     }
@@ -161,7 +184,7 @@ export class ProjectSession extends EventEmitter {
     if (this.releasing) return Promise.resolve()
     return this.exclusive(async () => {
       const L = this.loaded
-      if (!L || this.releasing) return
+      if (!L || this.releasing || L.sourceLost) return
       if (L.proxyPath) {
         this.toast('error', 'Không phát được video này, kể cả bản proxy.')
         return
@@ -179,9 +202,12 @@ export class ProjectSession extends EventEmitter {
 
   execute(cmd: DocCommand): Promise<CommandResult> {
     return this.exclusive(async () => {
-      const doc = this.loaded?.doc
-      if (!doc) return { ok: false, reason: 'no-video', message: 'Chưa có video. Hãy dùng File > Import Video.' }
-      return doc.execute(cmd)
+      const L = this.loaded
+      if (!L) return { ok: false, reason: 'no-video', message: 'Chưa có video. Hãy dùng File > Import Video.' }
+      if (cmd.type === 'captureFrame' && L.sourceLost && !(await this.reopenSaved(L))) {
+        return { ok: false, reason: 'no-video', message: SOURCE_LOST }
+      }
+      return L.doc.execute(cmd)
     })
   }
 
@@ -411,11 +437,20 @@ export class ProjectSession extends EventEmitter {
    * Writes a staging file next to the target, then renames it over the target. When the target is the file the
    * video plays from, the player is released and every read stream closed before the rename. Afterwards the video
    * is served from the saved file (new zip offsets) and the URL version bumps so the player reloads.
+   *
+   * Once the rename succeeded the project is saved, even if the saved file cannot be opened again right away: that
+   * is a warning, and the video keeps coming from the previous source when it is still valid, else captures are
+   * blocked until the file can be reopened (see reopenSaved).
    */
   private async writeTo(target: string): Promise<boolean> {
     const L = this.loaded
     if (!L) return false
     await L.doc.idle()
+    if (L.sourceLost && !(await this.reopenSaved(L))) {
+      // L.source points into a replaced file: writing it would copy the wrong bytes
+      this.toast('error', `Không lưu được dự án: ${SOURCE_LOST}`)
+      return false
+    }
     const project = L.doc.state.project
     const overwritingSource = L.source.kind === 'zipEntry' && samePath(L.source.zipPath, target)
     const staging = `${target}.saving-${randomBytes(4).toString('hex')}`
@@ -434,19 +469,6 @@ export class ProjectSession extends EventEmitter {
       }
       await renameWithRetry(staging, target)
       renamed = true
-      const reader = await openFbproj(target)
-      const old = L.reader
-      L.reader = reader
-      L.source = reader.video
-      L.doc.setSource(reader.video)
-      if (old && !overwritingSource) await old.close()
-      this.releasing = false
-      this.path = target
-      this.version++
-      await L.doc.markSaved()
-      await L.doc.setMeta({ videoOrigin: { kind: 'fbproj', path: target }, savedPath: target })
-      this.emitState()
-      return true
     } catch (e) {
       if (!renamed) await rm(staging, { force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined)
       if (released) {
@@ -460,6 +482,63 @@ export class ProjectSession extends EventEmitter {
           ? `Không đủ dung lượng đĩa: cần ${mb(e.neededBytes)} MB, còn ${mb(e.freeBytes)} MB. File cũ không bị thay đổi.`
           : `Không lưu được dự án: ${errText(e)}`
       )
+      return false
+    }
+
+    // saved: from here on nothing is reported as a failed save
+    this.path = target
+    await L.doc.markSaved()
+    let reader: FbprojReader | null = null
+    let reopenError: unknown = null
+    try {
+      reader = await openWithRetry(target)
+    } catch (e) {
+      reopenError = e
+    }
+    if (reader) {
+      const old = L.reader
+      L.reader = reader
+      L.source = reader.video
+      L.sourceLost = false
+      L.doc.setSource(reader.video)
+      if (old && !overwritingSource) await old.close()
+    } else if (overwritingSource) {
+      // the zip offsets of L.source belong to the replaced file (and its reader is closed)
+      L.reader = null
+      L.sourceLost = true
+    }
+    this.releasing = false
+    this.version++
+    await L.doc.setMeta({ videoOrigin: reader ? { kind: 'fbproj', path: target } : originOf(L.source), savedPath: target })
+    this.emitState()
+    if (reopenError) {
+      this.toast(
+        'error',
+        `Đã lưu dự án, nhưng không mở lại được file vừa lưu (${errText(reopenError)}). ` +
+          (L.sourceLost ? SOURCE_LOST : 'Video vẫn phát và chụp từ nguồn cũ.')
+      )
+    }
+    return true
+  }
+
+  /**
+   * After a save whose file could not be reopened over the playing file: tries again to open the saved file and
+   * serve the video from it. true when the source is usable again.
+   */
+  private async reopenSaved(L: Loaded): Promise<boolean> {
+    if (!L.sourceLost) return true
+    if (!this.path) return false
+    try {
+      const reader = await openWithRetry(this.path)
+      L.reader = reader
+      L.source = reader.video
+      L.sourceLost = false
+      L.doc.setSource(reader.video)
+      await L.doc.setMeta({ videoOrigin: { kind: 'fbproj', path: this.path }, savedPath: this.path })
+      this.version++
+      this.emitState()
+      return true
+    } catch {
       return false
     }
   }
@@ -529,7 +608,7 @@ export class ProjectSession extends EventEmitter {
       const doc = new ProjectDocument({ workspace, pts, video: info, source, project, extract: extractFrame, dirty: true })
       const savedPath = meta.savedPath && existsSync(meta.savedPath) ? meta.savedPath : null
       await doc.setMeta({
-        videoOrigin: source.kind === 'file' ? { kind: 'file', path: source.path } : { kind: 'fbproj', path: source.zipPath },
+        videoOrigin: originOf(source),
         savedPath
       })
       const proxyPath = needsProxy(info) ? await this.makeProxyFor(source, info) : null
