@@ -1,0 +1,64 @@
+import { app, BrowserWindow, ipcMain } from 'electron'
+
+import type { ExportSettings } from '../core/types'
+import type { DocCommand, PlaybackCommand } from '../shared/commands'
+import { IPC, type MenuEvent, type RendererState, type Toast } from '../shared/ipc'
+import type { ProjectSession } from './session'
+
+const RELEASE_TIMEOUT_MS = 2000
+
+/** Wires the renderer API (see FcApi) to the session and forwards session events to the window. */
+export function registerIpc(session: ProjectSession, win: () => BrowserWindow | null): void {
+  ipcMain.handle(IPC.getState, () => session.rendererState())
+  ipcMain.handle(IPC.execute, (_e, c: DocCommand) => session.execute(c))
+  ipcMain.handle(IPC.exportFlipbook, (_e, s: ExportSettings) =>
+    session.exportFlipbook(s, {
+      documentsDir: app.getPath('documents'),
+      defaultOutDir: process.env.FC_E2E_OUT_DIR || undefined
+    })
+  )
+  ipcMain.on(IPC.undo, () => void session.undo())
+  ipcMain.on(IPC.redo, () => void session.redo())
+  ipcMain.on(IPC.cancelBusy, () => session.cancelBusy())
+  ipcMain.on(IPC.reportVideoError, () => void session.reportVideoError())
+
+  const send = (channel: string, payload: unknown): void => {
+    const w = win()
+    if (w && !w.isDestroyed()) w.webContents.send(channel, payload)
+  }
+  session.on('state', (s: RendererState) => send(IPC.state, s))
+  session.on('toast', (t: Toast) => send(IPC.toast, t))
+}
+
+export function sendPlayback(w: BrowserWindow | null, c: PlaybackCommand): void {
+  if (w && !w.isDestroyed()) w.webContents.send(IPC.playback, c)
+}
+
+export function sendMenu(w: BrowserWindow | null, m: MenuEvent): void {
+  if (w && !w.isDestroyed()) w.webContents.send(IPC.menu, m)
+}
+
+/**
+ * The session's releaseVideo: asks the renderer to drop the <video> src and waits for its ack
+ * (or a 2 s timeout, so a hung renderer cannot block a save forever).
+ */
+export function makeReleaseVideo(win: () => BrowserWindow | null): () => Promise<void> {
+  let next = 0
+  return () =>
+    new Promise<void>((resolve) => {
+      const w = win()
+      if (!w || w.isDestroyed()) return resolve()
+      const token = ++next
+      const done = (): void => {
+        clearTimeout(timer)
+        ipcMain.removeListener(IPC.videoReleased, onAck)
+        resolve()
+      }
+      const onAck = (_e: unknown, t: number): void => {
+        if (t === token) done()
+      }
+      const timer = setTimeout(done, RELEASE_TIMEOUT_MS)
+      ipcMain.on(IPC.videoReleased, onAck)
+      w.webContents.send(IPC.releaseVideo, token)
+    })
+}

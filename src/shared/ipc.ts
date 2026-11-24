@@ -54,6 +54,7 @@ export const IPC = {
   cancelBusy: 'fc:cancelBusy', // send
   reportVideoError: 'fc:reportVideoError', // send
   videoReleased: 'fc:videoReleased', // send (ack of releaseVideo, carries the request token)
+  menuCommand: 'fc:menuCommand', // send (MenuCommandId from a keyboard shortcut, see shared/shortcuts.ts)
   state: 'fc:state', // push
   toast: 'fc:toast', // push
   playback: 'fc:playback', // push
