@@ -1,11 +1,16 @@
 import { useEffect } from 'react'
 
 import { frameMs } from '@core/timing'
+import { BusyOverlay } from './dialogs/BusyOverlay'
+import { Toast } from './dialogs/Toast'
 import { keyToAction } from './keymap'
 import { Player } from './player/Player'
 import { Timeline } from './player/Timeline'
 import { Transport } from './player/Transport'
+import { StatusBar } from './StatusBar'
 import { useStore } from './store'
+import { FrameStrip } from './strip/FrameStrip'
+import { FrameViewer } from './viewer/FrameViewer'
 
 function isEditable(t: EventTarget | null): boolean {
   const el = t as HTMLElement | null
@@ -61,12 +66,14 @@ function useMainProcessBridge(): void {
   }, [])
 }
 
-/** Layout B3 (spec section 5): video and frame viewer on top, then timeline, transport, frame strip, status bar. */
+/**
+ * Layout B3 (spec section 5): video and frame viewer side by side at the same size, then timeline, transport, frame
+ * strip and status bar. No capture or export buttons: capture is T / Ctrl+T, export is in the File menu.
+ */
 export function App() {
   useMainProcessBridge()
   const app = useStore((s) => s.app)
   const videoKey = useStore((s) => s.videoKey)
-  const toast = useStore((s) => s.toast)
   const video = app?.video ?? null
   const durationMs = video ? Math.max(video.info.durationMs, frameMs(video.pts, video.pts.length - 1)) : 0
 
@@ -76,7 +83,7 @@ export function App() {
         <section className="pane video-pane">
           {video ? <Player key={videoKey} url={video.url} pts={video.pts} info={video.info} /> : <div className="empty">Chưa có video. Dùng File › Import Video (Ctrl+I).</div>}
         </section>
-        <section className="pane viewer-pane" />
+        <FrameViewer />
       </div>
       {video && (
         <div className="controls">
@@ -84,8 +91,10 @@ export function App() {
           <Transport pts={video.pts} durationMs={durationMs} />
         </div>
       )}
-      {app?.busy && <div data-testid="busy">{app.busy.label}</div>}
-      {toast && <div data-testid="toast">{toast.text}</div>}
+      {video && <FrameStrip />}
+      <StatusBar />
+      <BusyOverlay />
+      <Toast />
     </div>
   )
 }

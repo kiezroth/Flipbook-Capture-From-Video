@@ -181,3 +181,264 @@ button.active {
   border-color: var(--accent);
   color: #fff;
 }
+
+/* ------------------------------------------------------------------ frame viewer */
+
+.viewer-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #000;
+  overflow: hidden;
+  display: flex;
+}
+
+.viewer-image,
+.crop-layer {
+  position: absolute;
+}
+
+.fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.viewer-label {
+  position: absolute;
+  top: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+/* same height as the player's "Đang xem" row, so both pictures are the same size */
+.viewing,
+.viewer-actions {
+  min-height: 30px;
+}
+
+.viewer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 2px 8px;
+}
+
+.viewer-hint {
+  color: var(--muted);
+  margin-right: auto;
+}
+
+.name-input {
+  background: #111;
+  color: var(--text);
+  border: 1px solid var(--accent);
+  padding: 3px 6px;
+  font: inherit;
+  width: 180px;
+  user-select: text;
+}
+
+.crop-rect {
+  position: absolute;
+  border: 1px solid #fff;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+}
+
+.crop-layer {
+  overflow: hidden;
+}
+
+.crop-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border: 1px solid #000;
+  touch-action: none;
+}
+
+.crop-handle.nw {
+  left: -1px;
+  top: -1px;
+  cursor: nwse-resize;
+}
+
+.crop-handle.ne {
+  right: -1px;
+  top: -1px;
+  cursor: nesw-resize;
+}
+
+.crop-handle.sw {
+  left: -1px;
+  bottom: -1px;
+  cursor: nesw-resize;
+}
+
+.crop-handle.se {
+  right: -1px;
+  bottom: -1px;
+  cursor: nwse-resize;
+}
+
+.crop-size {
+  position: absolute;
+  left: 20px;
+  bottom: 4px;
+  padding: 1px 4px;
+  background: rgba(0, 0, 0, 0.6);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ frame strip */
+
+.strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-height: 112px;
+  padding: 4px 2px 6px;
+  flex: 0 0 auto;
+}
+
+.strip-empty {
+  margin: auto;
+  color: var(--muted);
+}
+
+.strip-item {
+  flex: 0 0 auto;
+  width: 120px;
+  padding: 3px;
+  border: 2px solid var(--line);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.strip-item.selected {
+  border-color: var(--blue);
+}
+
+.strip-thumb {
+  width: 112px;
+  height: 72px;
+  background: #000;
+}
+
+.strip-thumb canvas {
+  object-fit: contain;
+}
+
+.strip-caption {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+
+.strip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.strip-ms {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ status bar, toast, busy */
+
+.statusbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 4px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  max-width: 70%;
+  padding: 8px 14px;
+  background: #333;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--blue);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 20;
+  cursor: default;
+}
+
+.toast.error {
+  border-left-color: var(--red);
+}
+
+.busy-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 10;
+  animation: busy-in 0.3s step-end; /* fast operations do not flash the overlay */
+}
+
+@keyframes busy-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.busy-box {
+  width: 360px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progress {
+  height: 8px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--accent);
+}
+
+.progress-bar.indeterminate {
+  width: 30%;
+  animation: progress-slide 1.2s linear infinite;
+}
+
+@keyframes progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+.busy-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 24px;
+}

@@ -19,13 +19,18 @@ export interface Store {
   player: PlayerStatus
   controller: PlayerController | null
   toast: Toast | null
+  /** Bumped by every showToast, so the same text shown twice restarts the toast's timer. */
+  toastId: number
 
   setAppState(s: RendererState): void
   selectFrame(id: string | null): void
   setController(c: PlayerController | null): void
   setPlayer(s: PlayerStatus): void
   showToast(t: Toast | null): void
-  /** Capture (T / Ctrl+T). The capture flow is not part of the player; until it is installed, the keys do nothing. */
+  /**
+   * Capture (T / Ctrl+T): pauses on the frame on screen, waits until the player has verified it, then asks main to
+   * capture that frame. The new frame becomes the selected one; a refusal (duplicate, no selection, mismatch) is a toast.
+   */
   capture(useSelection: boolean): Promise<void>
   /** Delete key and Edit > Xóa frame: deletes the selected frame. */
   deleteSelectedFrame(): Promise<void>
@@ -41,6 +46,9 @@ export const INITIAL_PLAYER: PlayerStatus = {
   settled: false
 }
 
+const NO_VIDEO = 'Chưa có video. Hãy dùng File › Import Video (Ctrl+I).'
+const MISMATCH = 'Không khớp frame đang hiển thị, chưa thể chụp. Hãy tua sang frame khác rồi quay lại.'
+
 function samePts(a: number[], b: number[]): boolean {
   if (a === b) return true
   if (a.length !== b.length) return false
@@ -55,6 +63,7 @@ export const useStore = create<Store>()((set, get) => ({
   player: INITIAL_PLAYER,
   controller: null,
   toast: null,
+  toastId: 0,
 
   setAppState(s) {
     const prev = get().app?.video ?? null
@@ -77,9 +86,28 @@ export const useStore = create<Store>()((set, get) => ({
   selectFrame: (id) => set({ selectedFrameId: id }),
   setController: (c) => set({ controller: c }),
   setPlayer: (s) => set({ player: s }),
-  showToast: (t) => set({ toast: t }),
+  showToast: (t) => set((s) => ({ toast: t, toastId: s.toastId + 1 })),
 
-  capture: async () => undefined,
+  async capture(useSelection) {
+    const controller = get().controller
+    if (!controller || !get().app?.video) {
+      get().showToast({ kind: 'error', text: NO_VIDEO })
+      return
+    }
+    const frameIndex = await controller.pauseAndSettle()
+    if (get().controller !== controller) return // the video changed meanwhile: that frame is gone
+    if (!controller.verified) {
+      get().showToast({ kind: 'error', text: MISMATCH })
+      return
+    }
+    const r = await window.fc.execute({ type: 'captureFrame', frameIndex, useSelection })
+    if (!r.ok) {
+      get().showToast({ kind: r.reason === 'duplicate' || r.reason === 'no-selection' ? 'info' : 'error', text: r.message })
+      return
+    }
+    // main pushes the new state before it answers, so the frame is already in app.project.frames
+    if (r.frameId) set({ selectedFrameId: r.frameId })
+  },
 
   async deleteSelectedFrame() {
     const id = get().selectedFrameId

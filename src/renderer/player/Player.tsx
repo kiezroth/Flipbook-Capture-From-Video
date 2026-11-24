@@ -13,7 +13,7 @@ interface Props {
 }
 
 /** Where a contain-fitted picture of w×h sits inside a cw×ch box. */
-function containBox(cw: number, ch: number, w: number, h: number): Box {
+export function containBox(cw: number, ch: number, w: number, h: number): Box {
   if (cw <= 0 || ch <= 0 || w <= 0 || h <= 0) return { left: 0, top: 0, width: 0, height: 0 }
   const scale = Math.min(cw / w, ch / h)
   const width = w * scale
