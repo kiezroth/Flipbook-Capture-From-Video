@@ -8,7 +8,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest'
 import type { VideoSource } from '../../src/core/fbproj'
 import { extractFrame, FrameMismatchError } from '../../src/main/ffmpeg/extract'
 import { probeVideo, readPtsTable } from '../../src/main/ffmpeg/probe'
-import { decodeIndex } from '../helpers/decodeIndex'
+import { decodeIndex, firstDecodedIndex } from '../helpers/decodeIndex'
 import { FIXTURES } from '../helpers/fixtures'
 
 const dir = mkdtempSync(join(tmpdir(), 'fc-extract-'))
@@ -34,6 +34,21 @@ test.each(['cfr30', 'offset_bframes', 'vfr'] as const)('%s: every 7th frame deco
     const out = tmpPng()
     await extractFrame(src, pts[i], info.startTimeSec, null, out)
     expect(await decodeIndex(readFileSync(out))).toBe(i)
+  }
+}, 120_000)
+
+test('trimmed (edit list): every 7th frame is the decoded frame of that index', async () => {
+  const src: VideoSource = { kind: 'file', path: FIXTURES.trimmed }
+  const pts = await readPtsTable(src)
+  const info = await probeVideo(src)
+  // the bit band holds the ORIGINAL cfr30 index: trimmed frame i shows cfr30 frame i + offset, where offset is the
+  // index of the first frame the decoder outputs
+  const offset = await firstDecodedIndex(FIXTURES.trimmed)
+  expect(offset).toBeGreaterThan(0)
+  for (let i = 0; i < pts.length; i += 7) {
+    const out = tmpPng()
+    await extractFrame(src, pts[i], info.startTimeSec, null, out)
+    expect(await decodeIndex(readFileSync(out))).toBe(i + offset)
   }
 }, 120_000)
 

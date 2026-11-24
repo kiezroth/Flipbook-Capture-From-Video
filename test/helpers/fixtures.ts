@@ -7,5 +7,6 @@ export const FIXTURES = {
   vfr: resolve(dir, 'vfr.mp4'),
   offset_bframes: resolve(dir, 'offset_bframes.mp4'),
   rotated: resolve(dir, 'rotated.mp4'),
+  trimmed: resolve(dir, 'trimmed.mp4'),
   hevc: resolve(dir, 'hevc.mkv')
 } as const satisfies Record<string, string>

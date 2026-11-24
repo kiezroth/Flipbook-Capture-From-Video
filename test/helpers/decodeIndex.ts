@@ -1,4 +1,8 @@
+import { execFileSync } from 'node:child_process'
+
 import { createCanvas, loadImage } from '@napi-rs/canvas'
+
+import { ffmpegPaths } from '../../src/main/ffmpeg/paths'
 
 /**
  * Reads the frame index encoded in the top band of a fixture frame: 8 cells, cell b centered at
@@ -26,4 +30,15 @@ export async function decodeIndex(png: Buffer, rotation: 0 | 90 = 0): Promise<nu
     if (luma >= 128) index |= 1 << b
   }
   return index
+}
+
+/**
+ * Bit index of the first frame ffmpeg decodes from an unrotated fixture (no seeking, no PTS table involved). For a
+ * fixture cut from cfr30 (trimmed.mp4) frame i of the file shows cfr30 frame i + this offset.
+ */
+export async function firstDecodedIndex(file: string): Promise<number> {
+  const png = execFileSync(ffmpegPaths().ffmpeg, ['-v', 'error', '-i', file, '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', '-'], {
+    maxBuffer: 64 * 1024 * 1024
+  })
+  return decodeIndex(png)
 }

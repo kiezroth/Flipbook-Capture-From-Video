@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 
 import type { RendererState } from '../src/shared/ipc'
-import { decodeIndex } from '../test/helpers/decodeIndex'
+import { decodeIndex, firstDecodedIndex } from '../test/helpers/decodeIndex'
 import { FIXTURES } from '../test/helpers/fixtures'
 import { capturedPng, dragOnVideo, importVideo as importInto, launch, pngSize, readDisplayed } from './helpers'
 
@@ -53,6 +53,23 @@ test('T captures exactly the displayed frame, also while playing', async () => {
   expect(await decodeIndex(await capturedPng(app, 1))).toBe(shown)
   await expect(win.getByTestId('strip-item')).toHaveCount(2)
   await expect(win.getByTestId('strip-item').nth(1)).toHaveAttribute('aria-selected', 'true')
+})
+
+test('trimmed (edit list) video: T captures the displayed frame', async () => {
+  // frame 0 of trimmed.mp4 shows cfr30 frame `base`; discard packets before it must never count as frames
+  const base = await firstDecodedIndex(FIXTURES.trimmed)
+  await importVideo(FIXTURES.trimmed)
+  expect(await readDisplayed(win)).toBe(base)
+  await win.keyboard.press('t')
+  await expect(win.getByTestId('strip-item')).toHaveCount(1)
+  expect(await decodeIndex(await capturedPng(app, 0))).toBe(base)
+  await expect(win.getByTestId('strip-item').first()).toContainText('0ms')
+  for (let i = 0; i < 23; i++) await win.keyboard.press('.')
+  await expect.poll(() => readDisplayed(win)).toBe(base + 23)
+  await win.keyboard.press('t')
+  await expect(win.getByTestId('strip-item')).toHaveCount(2)
+  expect(await decodeIndex(await capturedPng(app, 1))).toBe(base + 23)
+  expect((await state()).project!.frames.map((f) => f.ms).sort((a, b) => a - b)).toEqual([0, 767])
 })
 
 test('Ctrl+T without selection shows hint; with selection captures region', async () => {

@@ -7,6 +7,7 @@ import { expect, test, type ElectronApplication, type Page } from '@playwright/t
 import { frameMs, nearestFrameIndex, snapTimelineMs, stepByMs } from '../src/core/timing'
 import { readPtsTable } from '../src/main/ffmpeg/probe'
 import type { RendererState } from '../src/shared/ipc'
+import { firstDecodedIndex } from '../test/helpers/decodeIndex'
 import { FIXTURES } from '../test/helpers/fixtures'
 import { dragOnVideo, fmt, importVideo as importInto, launch, readDisplayed } from './helpers'
 
@@ -14,6 +15,8 @@ type Name = keyof typeof FIXTURES
 
 const tmp = mkdtempSync(join(tmpdir(), 'fc-e2e-player-'))
 const PTS = {} as Record<Name, number[]>
+/** Bit index shown by frame 0 of each fixture: 0, except trimmed.mp4 (cut from cfr30) which starts later. */
+const BASE = {} as Record<Name, number>
 let app: ElectronApplication
 let win: Page
 
@@ -27,7 +30,11 @@ const importVideo = async (path: string): Promise<void> => {
 test.describe.configure({ mode: 'serial' })
 
 test.beforeAll(async () => {
-  for (const name of ['cfr30', 'offset_bframes', 'vfr', 'rotated'] as const) PTS[name] = await readPtsTable({ kind: 'file', path: FIXTURES[name] })
+  for (const name of ['cfr30', 'offset_bframes', 'vfr', 'rotated', 'trimmed'] as const) {
+    PTS[name] = await readPtsTable({ kind: 'file', path: FIXTURES[name] })
+    BASE[name] = name === 'trimmed' ? await firstDecodedIndex(FIXTURES[name]) : 0
+  }
+  expect(BASE.trimmed).toBeGreaterThan(0)
   ;({ app, win } = await launch({ FC_E2E_SAVE_PATH: join(tmp, 'player.fbproj') }))
 })
 
@@ -41,22 +48,24 @@ test.afterEach(async () => {
   await expect(win.getByTestId('mismatch')).toHaveCount(0)
 })
 
-for (const name of ['cfr30', 'offset_bframes', 'vfr'] as const) {
+for (const name of ['cfr30', 'offset_bframes', 'vfr', 'trimmed'] as const) {
   test(`${name}: frame steps land exactly`, async () => {
+    // frame i of the PTS table must be the i-th frame the player shows (trimmed: no edit-list discard frames)
+    const shown = async (): Promise<number> => (await readDisplayed(win)) - BASE[name]
     await importVideo(FIXTURES[name])
     await expect(win.getByTestId('time')).toHaveText('00:00.000')
-    expect(await readDisplayed(win)).toBe(0) // also with a first PTS of 1.5s and B-frames
+    expect(await shown()).toBe(0) // also with a first PTS of 1.5s and B-frames
     for (let i = 0; i < 10; i++) await win.keyboard.press('.') // pressed in a row, no waiting
-    await expect.poll(() => readDisplayed(win)).toBe(10)
+    await expect.poll(shown).toBe(10)
     await expect(win.getByTestId('time')).toHaveText(fmt(frameMs(ptsOf(name), 10)))
     await expect(win.getByTestId('viewing')).toHaveText(`Đang xem ${frameMs(ptsOf(name), 10)}ms`)
     await win.keyboard.press('ArrowRight') // +100ms
-    await expect.poll(() => readDisplayed(win)).toBe(stepByMs(ptsOf(name), 10, 100))
+    await expect.poll(shown).toBe(stepByMs(ptsOf(name), 10, 100))
     await expect(win.getByTestId('time')).toHaveText(fmt(frameMs(ptsOf(name), stepByMs(ptsOf(name), 10, 100))))
     for (let i = 0; i < 3; i++) await win.keyboard.press(',')
     await win.keyboard.press('Shift+ArrowRight') // +1s
     const expected = stepByMs(ptsOf(name), stepByMs(ptsOf(name), 10, 100) - 3, 1000)
-    await expect.poll(() => readDisplayed(win)).toBe(expected)
+    await expect.poll(shown).toBe(expected)
     await expect(win.getByTestId('time')).toHaveText(fmt(frameMs(ptsOf(name), expected)))
   })
 }

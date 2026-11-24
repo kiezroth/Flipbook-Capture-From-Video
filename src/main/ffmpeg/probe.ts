@@ -51,19 +51,29 @@ function normalizeRotation(s: ProbeStream): 0 | 90 | 180 | 270 {
   return (deg === 90 || deg === 180 || deg === 270 ? deg : 0) as 0 | 90 | 180 | 270
 }
 
-/** packet pts_time of the first video stream, ascending, duplicates removed. */
+/**
+ * Parses `ffprobe -show_entries packet=pts_time,flags -of csv=p=0` output: packets flagged discard (`D`, e.g. the
+ * packets before the start of an MP4 edit list) are dropped because the decoder never outputs them. Ascending,
+ * duplicates removed.
+ */
+export function parsePtsTable(out: string): number[] {
+  const nums: number[] = []
+  for (const line of out.split(/\r?\n/)) {
+    const [pts = '', flags = ''] = line.trim().split(',')
+    if (pts === '' || pts === 'N/A' || flags.includes('D')) continue
+    const n = Number(pts)
+    if (Number.isFinite(n)) nums.push(n)
+  }
+  nums.sort((a, b) => a - b)
+  return nums.filter((n, i) => i === 0 || n !== nums[i - 1])
+}
+
+/** pts_time of every decodable packet of the first video stream, ascending, duplicates removed. */
 export async function readPtsTable(src: VideoSource): Promise<number[]> {
   const out = await run(ffmpegPaths().ffprobe, [
-    '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'packet=pts_time', '-of', 'csv=p=0', '-i', ffmpegInput(src)
+    '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'packet=pts_time,flags', '-of', 'csv=p=0', '-i', ffmpegInput(src)
   ])
-  const nums = out
-    .split(/\r?\n/)
-    .map((l) => l.trim().replace(/,+$/, ''))
-    .filter((l) => l !== '' && l !== 'N/A')
-    .map(Number)
-    .filter((n) => Number.isFinite(n))
-    .sort((a, b) => a - b)
-  return nums.filter((n, i) => i === 0 || n !== nums[i - 1])
+  return parsePtsTable(out)
 }
 
 export async function probeVideo(src: VideoSource): Promise<VideoInfo> {

@@ -59,6 +59,11 @@ export function makeFixtures(): void {
   if (missing('rotated.mp4')) {
     ffmpeg(['-display_rotation', '90', '-i', out('cfr30.mp4'), '-c', 'copy'], out('rotated.mp4'))
   }
+  if (missing('trimmed.mp4')) {
+    // Stream copy from a non-keyframe point: the mp4 gets an edit list and the packets before the cut point are
+    // flagged discard (negative pts); the decodable frames start at pts 0.
+    ffmpeg(['-ss', '1.1', '-i', out('cfr30.mp4'), '-c', 'copy'], out('trimmed.mp4'))
+  }
   if (missing('hevc.mkv')) {
     ffmpeg([...SRC, '-vf', `format=yuv420p,${BASE_FILTER}`, '-c:v', 'libx265', '-crf', '12'], out('hevc.mkv'))
   }
