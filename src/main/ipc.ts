@@ -7,6 +7,13 @@ import type { ProjectSession } from './session'
 
 const RELEASE_TIMEOUT_MS = 2000
 
+const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+/** Runs a fire-and-forget session operation; a failure becomes an error toast instead of an unhandled rejection. */
+export function toastOnError(session: ProjectSession, p: Promise<unknown>): void {
+  p.catch((e: unknown) => session.emit('toast', { kind: 'error', text: `Đã xảy ra lỗi: ${message(e)}` } satisfies Toast))
+}
+
 /** Wires the renderer API (see FcApi) to the session and forwards session events to the window. */
 export function registerIpc(session: ProjectSession, win: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.getState, () => session.rendererState())
@@ -17,10 +24,10 @@ export function registerIpc(session: ProjectSession, win: () => BrowserWindow | 
       defaultOutDir: process.env.FC_E2E_OUT_DIR || undefined
     })
   )
-  ipcMain.on(IPC.undo, () => void session.undo())
-  ipcMain.on(IPC.redo, () => void session.redo())
+  ipcMain.on(IPC.undo, () => toastOnError(session, session.undo()))
+  ipcMain.on(IPC.redo, () => toastOnError(session, session.redo()))
   ipcMain.on(IPC.cancelBusy, () => session.cancelBusy())
-  ipcMain.on(IPC.reportVideoError, () => void session.reportVideoError())
+  ipcMain.on(IPC.reportVideoError, () => toastOnError(session, session.reportVideoError()))
 
   const send = (channel: string, payload: unknown): void => {
     const w = win()

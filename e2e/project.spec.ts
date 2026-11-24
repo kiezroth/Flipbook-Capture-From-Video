@@ -69,3 +69,32 @@ test('save over the playing .fbproj releases the player and reloads it', async (
     await app.close()
   }
 })
+
+test('menu without a video; failures in close and undo become toasts and the window stays open', async () => {
+  const { app, win } = await launch()
+  try {
+    const enabled = await app.evaluate(({ Menu }) => {
+      const m = Menu.getApplicationMenu()!
+      return Object.fromEntries(['connectClaude', 'save', 'import', 'undo'].map((id) => [id, m.getMenuItemById(id)!.enabled]))
+    })
+    expect(enabled).toEqual({ connectClaude: true, save: false, import: true, undo: false })
+
+    await app.evaluate(({ BrowserWindow }) => {
+      const s = (globalThis as any).__fc.session
+      s.confirmClose = () => Promise.reject(new Error('boom-close'))
+      s.undo = () => Promise.reject(new Error('boom-undo'))
+      BrowserWindow.getAllWindows()[0].close()
+    })
+    await expect(win.getByTestId('toast')).toContainText('boom-close')
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1)
+    await win.evaluate(() => window.fc.undo())
+    await expect(win.getByTestId('toast')).toContainText('boom-undo')
+  } finally {
+    await app.evaluate(() => {
+      const s = (globalThis as any).__fc.session
+      delete s.confirmClose
+      delete s.undo
+    })
+    await app.close()
+  }
+})

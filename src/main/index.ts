@@ -4,7 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
 
 import { IPC, windowTitle } from '../shared/ipc'
 import type { MenuCommandId } from '../shared/shortcuts'
-import { makeReleaseVideo, registerIpc, sendMenu, sendPlayback } from './ipc'
+import { makeReleaseVideo, registerIpc, sendMenu, sendPlayback, toastOnError } from './ipc'
 import { installMediaHandlers, registerMediaSchemes } from './media-protocol'
 import { buildMenu, runMenuCommand, updateMenu } from './menu'
 import { ProjectSession, type Ask } from './session'
@@ -101,15 +101,30 @@ function createWindow(s: ProjectSession): BrowserWindow {
 
   // Unsaved changes: ask before the window goes away (also for app.quit / Exit).
   let closing = false
+  let confirming = false
   w.on('close', (e) => {
     if (closing) return
     e.preventDefault()
-    void s.confirmClose().then(async (ok) => {
+    if (confirming) return // a second click on X while the question is open
+    confirming = true
+    void (async () => {
+      let ok: boolean
+      try {
+        ok = await s.confirmClose()
+      } catch (err) {
+        // the user's choice is unknown: keep the window (and the project) open
+        s.emit('toast', { kind: 'error', text: `Không đóng được cửa sổ: ${err instanceof Error ? err.message : String(err)}` })
+        return
+      } finally {
+        confirming = false
+      }
       if (!ok) return
       closing = true
-      await s.dispose()
+      // The user has decided (saved, discarded or nothing to save): close even if cleanup fails. A leftover
+      // workspace is cleared, or offered for recovery if it was dirty, at the next start.
+      await s.dispose().catch(() => undefined)
       w.close()
-    })
+    })()
   })
 
   if (process.env['ELECTRON_RENDERER_URL']) void w.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -132,7 +147,7 @@ app.whenReady().then(() => {
   installMediaHandlers(() => s.media())
   registerIpc(s, getWin)
 
-  const run = (p: Promise<unknown>): void => void p.catch((e: unknown) => s.emit('toast', { kind: 'error', text: String(e) }))
+  const run = (p: Promise<unknown>): void => toastOnError(s, p)
   const menu = buildMenu({
     newProject: () => run(s.newProject()),
     open: () => run(s.open()),
