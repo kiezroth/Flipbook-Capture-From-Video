@@ -8,39 +8,9 @@ import { frameMs, nearestFrameIndex, snapTimelineMs, stepByMs } from '../src/cor
 import { readPtsTable } from '../src/main/ffmpeg/probe'
 import type { RendererState } from '../src/shared/ipc'
 import { FIXTURES } from '../test/helpers/fixtures'
-import { importVideo as importInto, launch } from './helpers'
+import { fmt, importVideo as importInto, launch, readDisplayed } from './helpers'
 
 type Name = keyof typeof FIXTURES
-
-/** `mm:ss.mmm` */
-export function fmt(ms: number): string {
-  const m = Math.floor(ms / 60000)
-  const s = Math.floor((ms % 60000) / 1000)
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`
-}
-
-/**
- * Index of the frame the <video> element shows, decoded from the fixture's bit band (like test/helpers/decodeIndex):
- * the element is drawn to a canvas in the renderer (fbvideo: is CORS-enabled, so the canvas is readable).
- * Waits until the player is settled (paused, nothing pending), the state in which the time display is final.
- */
-export async function readDisplayed(win: Page): Promise<number> {
-  await win.locator('[data-testid="player"][data-settled="true"]').waitFor()
-  return win.evaluate(() => {
-    const v = document.querySelector('video')!
-    const c = document.createElement('canvas')
-    c.width = v.videoWidth
-    c.height = v.videoHeight
-    const ctx = c.getContext('2d', { willReadFrequently: true })!
-    ctx.drawImage(v, 0, 0)
-    let index = 0
-    for (let b = 0; b < 8; b++) {
-      const px = ctx.getImageData(Math.floor(((b + 0.5) * c.width) / 8), Math.floor(c.height / 8), 1, 1).data
-      if (0.299 * px[0] + 0.587 * px[1] + 0.114 * px[2] >= 128) index |= 1 << b
-    }
-    return index
-  })
-}
 
 const tmp = mkdtempSync(join(tmpdir(), 'fc-e2e-player-'))
 const PTS = {} as Record<Name, number[]>
