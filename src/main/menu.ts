@@ -19,8 +19,11 @@ export interface MenuHandlers {
   connectClaude(): void
 }
 
-/** Items usable only once a video is loaded: per spec, after New only New, Open, Import Video and Exit work. */
-const NEEDS_VIDEO = ['save', 'saveAs', 'export', 'deleteFrame', 'speed-0.1', 'speed-0.25', 'speed-0.5', 'speed-1', 'connectClaude']
+/**
+ * Items usable only once a video is loaded: after New only New, Open, Import Video and Exit work (spec section 9),
+ * plus Help > Kết nối với Claude, which does not depend on a loaded video.
+ */
+const NEEDS_VIDEO = ['save', 'saveAs', 'export', 'deleteFrame', 'speed-0.1', 'speed-0.25', 'speed-0.5', 'speed-1']
 const SPEEDS: Speed[] = [0.1, 0.25, 0.5, 1]
 
 /**
@@ -75,15 +78,27 @@ export function buildMenu(h: MenuHandlers): Menu {
   return menu
 }
 
-export function updateMenu(menu: Menu, s: { hasVideo: boolean; canUndo: boolean; canRedo: boolean }): void {
-  for (const id of NEEDS_VIDEO) {
+export interface MenuState {
+  hasVideo: boolean
+  canUndo: boolean
+  canRedo: boolean
+}
+
+/** Enabled flag of every item whose state changes (items not listed are always enabled). */
+export function menuEnabledState(s: MenuState): Record<string, boolean> {
+  const out: Record<string, boolean> = {}
+  for (const id of NEEDS_VIDEO) out[id] = s.hasVideo
+  out.undo = s.hasVideo && s.canUndo
+  out.redo = s.hasVideo && s.canRedo
+  out.connectClaude = true
+  return out
+}
+
+export function updateMenu(menu: Menu, s: MenuState): void {
+  for (const [id, enabled] of Object.entries(menuEnabledState(s))) {
     const item = menu.getMenuItemById(id)
-    if (item) item.enabled = s.hasVideo
+    if (item) item.enabled = enabled
   }
-  const undo = menu.getMenuItemById('undo')
-  if (undo) undo.enabled = s.hasVideo && s.canUndo
-  const redo = menu.getMenuItemById('redo')
-  if (redo) redo.enabled = s.hasVideo && s.canRedo
 }
 
 /** Runs a menu item for a forwarded shortcut, only when the item is currently enabled. */
