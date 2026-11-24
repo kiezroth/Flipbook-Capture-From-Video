@@ -17,12 +17,13 @@ export function FrameStrip() {
   const numbered = useMemo(() => numberFrames(frames ?? []), [frames])
   const listRef = useRef<HTMLDivElement>(null)
 
-  // keep the selected item in view (a new capture is selected, so this also follows captures)
+  // Bring the selected item into view when the selection changes (a new capture is selected, and main pushes its
+  // state before the capture answers, so its item exists by then). Other state pushes leave the user's scroll alone.
   useEffect(() => {
     if (!selectedId) return
     const el = listRef.current?.querySelector<HTMLElement>(`[data-frame-id="${CSS.escape(selectedId)}"]`)
     el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [selectedId, numbered])
+  }, [selectedId])
 
   return (
     <div className="strip" ref={listRef} role="listbox" aria-label="Frame đã chụp" aria-orientation="horizontal">

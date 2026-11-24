@@ -217,3 +217,22 @@ test('status bar: shortcuts left, project name with * right; no capture or expor
   await expect(win.getByTestId('status-project')).toHaveText('cap.fbproj')
   await expect(win.getByRole('button', { name: /chụp|xuất|export|capture/i })).toHaveCount(0)
 })
+
+test('the strip scrolls to the selected frame', async () => {
+  const item = win.getByTestId('strip-item')
+  for (let i = 0; i < 16; i++) {
+    const r = await app.evaluate(
+      async (_e, n) => (globalThis as any).__fc.session.execute({ type: 'captureFrame', frameIndex: n, useSelection: false }),
+      50 + i * 2 // cfr30 has 90 frames
+    )
+    expect(r.ok).toBe(true)
+  }
+  await expect(item).toHaveCount(19)
+  const strip = win.getByRole('listbox', { name: 'Frame đã chụp' })
+  await strip.evaluate((el) => (el.scrollLeft = 0))
+  expect(await strip.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
+  await win.getByTestId('timeline-frame').last().click() // selects the last frame
+  await expect(item.last()).toHaveAttribute('aria-selected', 'true')
+  await expect(item.last()).toBeInViewport()
+  expect(await strip.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0)
+})
