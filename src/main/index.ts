@@ -6,7 +6,7 @@ import { IPC, windowTitle } from '../shared/ipc'
 import type { MenuCommandId } from '../shared/shortcuts'
 import { makeReleaseVideo, registerIpc, sendMenu, sendPlayback, toastOnError } from './ipc'
 import { installMediaHandlers, registerMediaSchemes } from './media-protocol'
-import { buildMenu, runMenuCommand, updateMenu } from './menu'
+import { buildMenu, checkSpeed, runMenuCommand, updateMenu } from './menu'
 import { ProjectSession, type Ask } from './session'
 
 const E2E = process.env.FC_E2E === '1'
@@ -164,6 +164,7 @@ app.whenReady().then(() => {
   })
   Menu.setApplicationMenu(menu)
   ipcMain.on(IPC.menuCommand, (_e, id: MenuCommandId) => runMenuCommand(menu, id))
+  ipcMain.on(IPC.reportSpeed, (_e, speed: unknown) => checkSpeed(menu, speed))
   s.on('state', (st: ReturnType<ProjectSession['rendererState']>) => {
     updateMenu(menu, { hasVideo: st.video !== null, canUndo: st.canUndo, canRedo: st.canRedo })
     if (win && !win.isDestroyed()) win.setTitle(windowTitle(st))

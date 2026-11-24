@@ -8,12 +8,16 @@ export type DocCommand =
   | { type: 'setSelection'; rect: Rect | null }
   | { type: 'setExportSettings'; settings: ExportSettings }
 
+/** Playback speeds (spec section 6). */
+export type Speed = 0.1 | 0.25 | 0.5 | 1
+export const SPEEDS: readonly Speed[] = [0.1, 0.25, 0.5, 1]
+
 export type PlaybackCommand =
   | { type: 'togglePlay' }
   | { type: 'seekMs'; ms: number }
   | { type: 'stepMs'; deltaMs: number }
   | { type: 'stepFrame'; delta: number }
-  | { type: 'setSpeed'; speed: 0.1 | 0.25 | 0.5 | 1 }
+  | { type: 'setSpeed'; speed: Speed }
   | { type: 'gotoFrame'; id: string }
 
 export type CommandResult =

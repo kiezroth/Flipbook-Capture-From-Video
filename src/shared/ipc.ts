@@ -1,5 +1,5 @@
 import type { ExportSettings, ProjectFile, VideoInfo } from '../core/types'
-import type { CommandResult, DocCommand, PlaybackCommand } from './commands'
+import type { CommandResult, DocCommand, PlaybackCommand, Speed } from './commands'
 
 export interface BusyState {
   label: string
@@ -42,6 +42,8 @@ export interface FcApi {
   exportFlipbook(s: ExportSettings): Promise<ExportResponse>
   cancelBusy(): void
   reportVideoError(): void
+  /** The player's speed changed (on-screen buttons): main checks the matching View menu item. */
+  reportSpeed(speed: Speed): void
 }
 
 /** IPC channel names. invoke = renderer→main with reply, send = renderer→main, push = main→renderer. */
@@ -53,6 +55,7 @@ export const IPC = {
   redo: 'fc:redo', // send
   cancelBusy: 'fc:cancelBusy', // send
   reportVideoError: 'fc:reportVideoError', // send
+  reportSpeed: 'fc:reportSpeed', // send (Speed)
   videoReleased: 'fc:videoReleased', // send (ack of releaseVideo, carries the request token)
   menuCommand: 'fc:menuCommand', // send (MenuCommandId from a keyboard shortcut, see shared/shortcuts.ts)
   state: 'fc:state', // push

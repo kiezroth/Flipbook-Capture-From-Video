@@ -20,7 +20,8 @@ const api: FcApi = {
   onToast: (cb) => on(IPC.toast, cb),
   exportFlipbook: (s) => ipcRenderer.invoke(IPC.exportFlipbook, s),
   cancelBusy: () => ipcRenderer.send(IPC.cancelBusy),
-  reportVideoError: () => ipcRenderer.send(IPC.reportVideoError)
+  reportVideoError: () => ipcRenderer.send(IPC.reportVideoError),
+  reportSpeed: (speed) => ipcRenderer.send(IPC.reportSpeed, speed)
 }
 
 contextBridge.exposeInMainWorld('fc', api)

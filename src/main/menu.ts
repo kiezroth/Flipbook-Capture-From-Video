@@ -1,8 +1,7 @@
 import { Menu, type MenuItemConstructorOptions } from 'electron'
 
+import { SPEEDS, type Speed } from '../shared/commands'
 import type { MenuCommandId } from '../shared/shortcuts'
-
-export type Speed = 0.1 | 0.25 | 0.5 | 1
 
 export interface MenuHandlers {
   newProject(): void
@@ -24,7 +23,6 @@ export interface MenuHandlers {
  * plus Help > Kết nối với Claude, which does not depend on a loaded video.
  */
 const NEEDS_VIDEO = ['save', 'saveAs', 'export', 'deleteFrame', 'speed-0.1', 'speed-0.25', 'speed-0.5', 'speed-1']
-const SPEEDS: Speed[] = [0.1, 0.25, 0.5, 1]
 
 /**
  * Accelerators are shown but not registered: the renderer forwards the shortcut keys (shared/shortcuts.ts) and main
@@ -99,6 +97,13 @@ export function updateMenu(menu: Menu, s: MenuState): void {
     const item = menu.getMenuItemById(id)
     if (item) item.enabled = enabled
   }
+}
+
+/** View menu: checks the radio item of a speed chosen elsewhere (the on-screen speed buttons). */
+export function checkSpeed(menu: Menu, speed: unknown): void {
+  if (!SPEEDS.includes(speed as Speed)) return
+  const item = menu.getMenuItemById(`speed-${speed}`)
+  if (item) item.checked = true
 }
 
 /** Runs a menu item for a forwarded shortcut, only when the item is currently enabled. */
