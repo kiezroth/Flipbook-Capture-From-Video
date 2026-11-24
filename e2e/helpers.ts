@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { _electron, type ElectronApplication, type Page } from '@playwright/test'
+import { _electron, expect, type ElectronApplication, type Page } from '@playwright/test'
 
 const MAIN = resolve(__dirname, '..', 'out', 'main', 'index.js')
 
@@ -57,4 +57,35 @@ export async function readDisplayed(win: Page): Promise<number> {
     }
     return index
   })
+}
+
+/** Drags on the video's selection layer from one point to another, given as fractions of the picture box. */
+export async function dragOnVideo(win: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+  const b = (await win.getByTestId('selection-layer').boundingBox())!
+  await win.mouse.move(b.x + b.width * from.x, b.y + b.height * from.y)
+  await win.mouse.down()
+  await win.mouse.move(b.x + b.width * to.x, b.y + b.height * to.y, { steps: 5 })
+  await win.mouse.up()
+}
+
+/**
+ * PNG bytes of the i-th captured frame in capture order (the frames' `seq`, oldest first) among the frames of the
+ * current project, read from the session's workspace frames dir. Waits until that frame exists.
+ */
+export async function capturedPng(app: ElectronApplication, i: number): Promise<Buffer> {
+  const where = async (): Promise<{ dir: string; id: string } | null> =>
+    app.evaluate((_e, n) => {
+      const s = (globalThis as any).__fc.session
+      const frames = [...(s.doc?.state.project.frames ?? [])].sort((a: any, b: any) => a.seq - b.seq)
+      const dir = s.media().framesDir as string | null
+      return dir && frames[n] ? { dir, id: frames[n].id as string } : null
+    }, i)
+  await expect.poll(where).not.toBeNull()
+  const { dir, id } = (await where())!
+  return readFileSync(join(dir, `${id}.png`))
+}
+
+/** [width, height] from a PNG's IHDR chunk. */
+export function pngSize(png: Buffer): [number, number] {
+  return [png.readUInt32BE(16), png.readUInt32BE(20)]
 }

@@ -8,7 +8,7 @@ import { frameMs, nearestFrameIndex, snapTimelineMs, stepByMs } from '../src/cor
 import { readPtsTable } from '../src/main/ffmpeg/probe'
 import type { RendererState } from '../src/shared/ipc'
 import { FIXTURES } from '../test/helpers/fixtures'
-import { fmt, importVideo as importInto, launch, readDisplayed } from './helpers'
+import { dragOnVideo, fmt, importVideo as importInto, launch, readDisplayed } from './helpers'
 
 type Name = keyof typeof FIXTURES
 
@@ -152,21 +152,14 @@ test('captured frames are green marks; clicking one selects it without seeking; 
 })
 
 test('dragging on the video sets the selection in video pixels (rotated too)', async () => {
-  const drag = async (from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> => {
-    const b = (await win.getByTestId('selection-layer').boundingBox())!
-    await win.mouse.move(b.x + b.width * from.x, b.y + b.height * from.y)
-    await win.mouse.down()
-    await win.mouse.move(b.x + b.width * to.x, b.y + b.height * to.y, { steps: 5 })
-    await win.mouse.up()
-  }
   await importVideo(FIXTURES.cfr30)
-  await drag({ x: 0, y: 0 }, { x: 0.5, y: 0.5 })
+  await dragOnVideo(win, { x: 0, y: 0 }, { x: 0.5, y: 0.5 })
   await expect.poll(async () => (await state()).project!.selection).toEqual({ x: 0, y: 0, w: 320, h: 180 })
   await expect(win.getByTestId('selection-rect')).toBeVisible()
 
   await importVideo(FIXTURES.rotated)
   expect((await state()).video!.info).toMatchObject({ width: 360, height: 640 })
-  await drag({ x: 0, y: 0 }, { x: 1, y: 0.5 })
+  await dragOnVideo(win, { x: 0, y: 0 }, { x: 1, y: 0.5 })
   await expect.poll(async () => (await state()).project!.selection).toEqual({ x: 0, y: 0, w: 360, h: 320 })
   // the layer covers the picture (contain-fitted, portrait)
   const b = (await win.getByTestId('selection-layer').boundingBox())!
