@@ -214,12 +214,23 @@ test('a seek that presents nothing new keeps the frame on screen: mismatch, capt
   expect([c.displayedIndex, c.targetIndex, v.shown, c.verified]).toEqual([0, 0, 0, false])
 })
 
-test('when rVFC never reports a frame, falls back to seeked + currentTime', async () => {
+test('when rVFC never reports a frame, the currentTime fallback places the display but never verifies', async () => {
   const { v, c } = make(cfr, 1.5, { rvfcTimeoutMs: 5 })
   v.rvfcBroken = true
   await c.load('u')
   await c.execute({ type: 'stepFrame', delta: 12 })
-  expect([c.displayedIndex, v.shown, c.verified]).toEqual([12, 12, true])
+  expect([c.displayedIndex, v.shown, c.verified, c.status.settled]).toEqual([12, 12, false, true])
+})
+
+test('the fallback cannot hide a wrong offset (absolute timeline, rVFC never fires)', async () => {
+  // fallback calibration assumes a timeline from 0: offset = pts[0] = 1.5 while the real shift is 0, so a seek to
+  // frame 12 sets currentTime 0.4167 and the screen shows frame 0; that must not count as verified
+  const { v, c } = make(cfr, 0, { rvfcTimeoutMs: 5 })
+  v.rvfcBroken = true
+  await c.load('u')
+  await c.execute({ type: 'stepFrame', delta: 12 })
+  expect(v.shown).toBe(0)
+  expect(c.verified).toBe(false)
 })
 
 test('a new URL for the same video reloads, re-calibrates and returns to the displayed frame', async () => {

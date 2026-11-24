@@ -46,6 +46,12 @@ const HAVE_CURRENT_DATA = 2
 /** Animation frames to wait for a re-presentation before accepting that the sought frame is already on screen. */
 const SAME_FRAME_WAIT_FRAMES = 3
 
+/** Where a seek landed. `trusted` is false for the currentTime fallback, which cannot see a mismatch. */
+interface Landing {
+  mediaTime: number
+  trusted: boolean
+}
+
 const nextFrame = (): Promise<void> =>
   new Promise((resolve) => {
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve())
@@ -71,8 +77,10 @@ const nextFrame = (): Promise<void> =>
  * for, that is the answer. Otherwise it keeps waiting up to rvfcTimeoutMs for a presentation. If none comes, the
  * frame on screen is still the last presented one, and that is the answer (a mismatch, so the safe outcome is a
  * re-seek and, failing that, a blocked capture). Only when rVFC has not reported any frame since the load (rVFC not
- * working) does it fall back to `seeked` + one animation frame and trust currentTime: the frame whose PTS is the
- * largest one not after currentTime + offsetSec.
+ * working) does it fall back to `seeked` + one animation frame and take currentTime: the frame whose PTS is the
+ * largest one not after currentTime + offsetSec. That answer only places the time display; it can never verify a
+ * frame (it maps the seek target straight back to itself), so verified stays false, and an offset calibrated from it
+ * is never trusted for verification either.
  *
  * All seeking work (load/calibration, settling, the pause hand-over, starting playback) runs one job at a time.
  */
@@ -81,6 +89,8 @@ export class PlayerController {
   private readonly opts: PlayerOptions
   private offsetSec = 0
   private calibrated = false
+  /** false when the offset came from the currentTime fallback: nothing can be verified against it. */
+  private offsetTrusted = false
   private _displayed = 0
   private _target = 0
   private _playing = false
@@ -301,21 +311,21 @@ export class PlayerController {
         this.emit()
         return
       }
-      let shown = await this.seekIndex(target)
+      let r = await this.seekIndex(target)
       if (gen !== this.gen) continue
-      if (shown !== null) this.show(shown)
+      if (r !== null) this.show(r.index)
       if (this._target !== target) continue // superseded: go straight to the newest target
-      if (shown !== target) {
-        shown = await this.seekIndex(target) // re-seek once
+      if (r === null || r.index !== target) {
+        r = await this.seekIndex(target) // re-seek once
         if (gen !== this.gen) continue
-        if (shown !== null) this.show(shown)
+        if (r !== null) this.show(r.index)
         if (this._target !== target) continue
       }
       this.needsVerify = false
-      this._verified = shown === target
+      this._verified = r !== null && r.trusted && this.offsetTrusted && r.index === target
       // On a mismatch, later steps continue from the frame really on screen.
-      if (shown !== null && shown !== target) this._target = shown
-      if (shown === null) this._target = this._displayed
+      if (r !== null && r.index !== target) this._target = r.index
+      if (r === null) this._target = this._displayed
       this.emit()
     }
   }
@@ -328,8 +338,8 @@ export class PlayerController {
       if (!this._playing || this.disposed) return
       if (this._displayed >= this.pts.length - 1) {
         // at the end: start over from the first frame
-        const shown = await this.seekIndex(0)
-        if (shown !== null) this.show(shown)
+        const r = await this.seekIndex(0)
+        if (r !== null) this.show(r.index)
         this._target = this._displayed
         if (!this._playing) return
       }
@@ -415,31 +425,33 @@ export class PlayerController {
     // first frame here (a seek before the first frame shows the first frame).
     const guess = p.length > 1 ? (p[1] - p[0]) / 2 : 0
     // Calibration is the first seek after a load: a frame presented since then is the first frame.
-    const mediaTime = await this.seekRaw(guess, p[0], () => true)
+    const landing = await this.seekRaw(guess, p[0], () => true)
     if (gen !== this.gen) return
-    if (mediaTime === null) throw new Error('calibration seek failed')
-    this.offsetSec = p[0] - mediaTime
+    if (landing === null) throw new Error('calibration seek failed')
+    this.offsetSec = p[0] - landing.mediaTime
+    this.offsetTrusted = landing.trusted
     this.calibrated = true
     this.needsVerify = true
   }
 
   /** Seeks to frame i; resolves with the index of the frame rVFC reports on screen, null if the seek failed. */
-  private async seekIndex(i: number): Promise<number | null> {
-    const mediaTime = await this.seekRaw(
+  private async seekIndex(i: number): Promise<{ index: number; trusted: boolean } | null> {
+    const landing = await this.seekRaw(
       seekTargetSec(this.pts, i, this.offsetSec),
       this.offsetSec,
       (m) => nearestFrameIndex(this.pts, m + this.offsetSec) === i
     )
-    return mediaTime === null ? null : nearestFrameIndex(this.pts, mediaTime + this.offsetSec)
+    if (landing === null) return null
+    return { index: nearestFrameIndex(this.pts, landing.mediaTime + this.offsetSec), trusted: landing.trusted }
   }
 
   /**
    * Sets currentTime = t and resolves with the mediaTime of the frame presented for it (see "Paused seeks" in the
-   * class comment). `isSought(lastMedia)` says whether the frame last presented is the one this seek asks for;
+   * class comment); `trusted` is false only for the currentTime fallback. `isSought(lastMedia)` says whether the frame last presented is the one this seek asks for;
    * `offsetEstimate` maps currentTime to the PTS grid in the fallback. null when the seek cannot complete (no media,
    * src removed, timeout).
    */
-  private seekRaw(t: number, offsetEstimate: number, isSought: (lastMedia: number) => boolean): Promise<number | null> {
+  private seekRaw(t: number, offsetEstimate: number, isSought: (lastMedia: number) => boolean): Promise<Landing | null> {
     const v = this.video
     if (v.readyState < HAVE_METADATA) return Promise.resolve(null)
     const rvfcTimeout = this.opts.rvfcTimeoutMs ?? 1000
@@ -448,7 +460,7 @@ export class PlayerController {
       let seeked = false
       let finished = false
       let fallback: ReturnType<typeof setTimeout> | null = null
-      const finish = (m: number | null): void => {
+      const finish = (m: Landing | null): void => {
         if (finished) return
         finished = true
         v.removeEventListener('seeked', onSeeked)
@@ -461,7 +473,7 @@ export class PlayerController {
       }
       const abort = (): void => finish(null)
       const check = (): void => {
-        if (seeked && this.presented > before) finish(this.lastMedia)
+        if (seeked && this.presented > before && this.lastMedia !== null) finish({ mediaTime: this.lastMedia, trusted: true })
       }
       const onSeeked = async (): Promise<void> => {
         seeked = true
@@ -469,13 +481,14 @@ export class PlayerController {
         const started = Date.now()
         for (let k = 0; k < SAME_FRAME_WAIT_FRAMES && !finished; k++) await nextFrame()
         if (finished) return
-        if (this.lastMedia !== null && isSought(this.lastMedia)) return finish(this.lastMedia)
+        if (this.lastMedia !== null && isSought(this.lastMedia)) return finish({ mediaTime: this.lastMedia, trusted: true })
         fallback = setTimeout(
           () => {
-            if (this.lastMedia !== null) return finish(this.lastMedia)
+            // nothing new presented: the last presented frame is still on screen
+            if (this.lastMedia !== null) return finish({ mediaTime: this.lastMedia, trusted: true })
             void nextFrame().then(() => {
               const i = frameIndexAtMs(this.pts, (v.currentTime + offsetEstimate - this.pts[0]) * 1000)
-              finish(this.pts[i] - offsetEstimate)
+              finish({ mediaTime: this.pts[i] - offsetEstimate, trusted: false })
             })
           },
           Math.max(0, rvfcTimeout - (Date.now() - started))
