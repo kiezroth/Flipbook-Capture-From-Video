@@ -1,8 +1,5 @@
-import type { PlaybackCommand } from '@shared/commands'
+import type { PlaybackCommand, Speed } from '@shared/commands'
 import { frameIndexAtMs, frameMs, nearestFrameIndex, seekTargetSec, stepByMs } from '@core/timing'
-
-export type Speed = 0.1 | 0.25 | 0.5 | 1
-export const SPEEDS: readonly Speed[] = [0.1, 0.25, 0.5, 1]
 
 export interface PlayerStatus {
   /** Frame on screen, confirmed by requestVideoFrameCallback. */
@@ -46,6 +43,8 @@ export interface PlayerOptions {
 
 const HAVE_METADATA = 1
 const HAVE_CURRENT_DATA = 2
+/** Animation frames to wait for a re-presentation before accepting that the sought frame is already on screen. */
+const SAME_FRAME_WAIT_FRAMES = 3
 
 const nextFrame = (): Promise<void> =>
   new Promise((resolve) => {
@@ -63,12 +62,17 @@ const nextFrame = (): Promise<void> =>
  *   sets verified = false (capture is blocked) and shows the frame really on screen.
  * - Every step is computed from targetIndex, and seeks coalesce: while one seek runs, new presses only move the
  *   target; the loop then seeks straight to the newest target.
- * - Playing: each rVFC callback updates displayedIndex. Pausing stops at the frame on screen and re-seeks to it, so
- *   the paused picture is a verified frame.
+ * - A persistent rVFC watcher records every presented frame (mediaTime). Playing: each callback updates
+ *   displayedIndex. Pausing stops at the frame on screen and re-seeks to it, so the paused picture is a verified frame.
  *
- * Paused-seek fallback: Chromium presents the sought frame, and fires rVFC, even while paused. Should rVFC not come
- * within rvfcTimeoutMs after `seeked`, the controller waits one animation frame and trusts currentTime instead
- * (the frame whose PTS is the largest one not after currentTime + offsetSec).
+ * Paused seeks: Chromium presents the sought frame, and fires rVFC, even while paused, except when the seek lands on
+ * the frame already on screen (observed in Electron 45: no re-presentation). So after `seeked` without a new
+ * presentation, the controller waits a few animation frames; if the frame last presented is the one the seek asks
+ * for, that is the answer. Otherwise it keeps waiting up to rvfcTimeoutMs for a presentation. If none comes, the
+ * frame on screen is still the last presented one, and that is the answer (a mismatch, so the safe outcome is a
+ * re-seek and, failing that, a blocked capture). Only when rVFC has not reported any frame since the load (rVFC not
+ * working) does it fall back to `seeked` + one animation frame and trust currentTime: the frame whose PTS is the
+ * largest one not after currentTime + offsetSec.
  *
  * All seeking work (load/calibration, settling, the pause hand-over, starting playback) runs one job at a time.
  */
@@ -91,7 +95,11 @@ export class PlayerController {
   private pausing: Promise<void> | null = null
   private loadJob: Promise<void> | null = null
   private abortSeek: (() => void) | null = null
-  private playHandle: number | null = null
+  private watchHandle: number | null = null
+  /** Number of frames presented so far, and the mediaTime of the last one (null: nothing since the last load). */
+  private presented = 0
+  private lastMedia: number | null = null
+  private presentHook: (() => void) | null = null
   private draining = false
   private disposed = false
   private readonly listeners = new Set<(s: PlayerStatus) => void>()
@@ -110,6 +118,7 @@ export class PlayerController {
     this.opts = opts
     video.muted = true
     video.addEventListener('pause', this.onPauseEvent)
+    this.watchHandle = video.requestVideoFrameCallback(this.onFrame)
   }
 
   get displayedIndex(): number {
@@ -144,8 +153,9 @@ export class PlayerController {
   load(url: string): Promise<void> {
     const gen = ++this.gen
     this.abortSeek?.()
-    this.stopPlayLoop()
+    this.draining = false
     this._playing = false
+    this.lastMedia = null
     this._loading = true
     this._verified = false
     this.video.src = url
@@ -223,8 +233,9 @@ export class PlayerController {
     this.disposed = true
     this.gen++
     this.abortSeek?.()
-    this.stopPlayLoop()
     this._playing = false
+    if (this.watchHandle !== null) this.video.cancelVideoFrameCallback(this.watchHandle)
+    this.watchHandle = null
     this.video.removeEventListener('pause', this.onPauseEvent)
     this.video.pause()
     this.listeners.clear()
@@ -323,13 +334,11 @@ export class PlayerController {
         if (!this._playing) return
       }
       this.video.playbackRate = this._speed
-      this.startPlayLoop()
       try {
         await this.video.play()
       } catch {
         if (this._playing) {
           this._playing = false
-          this.stopPlayLoop()
           this.emit()
         }
       }
@@ -346,7 +355,6 @@ export class PlayerController {
       await nextFrame()
       await nextFrame()
       this.draining = false
-      this.stopPlayLoop()
       this._target = this._displayed
       this.needsVerify = true
     }).finally(() => {
@@ -357,23 +365,18 @@ export class PlayerController {
     void this.settle()
   }
 
-  private startPlayLoop(): void {
-    this.stopPlayLoop()
-    const tick = (_now: number, meta: VideoFrameCallbackMetadata): void => {
-      this.playHandle = null
-      if (!this._playing && !this.draining) return
+  /** Persistent rVFC watcher: records each presented frame; while playing (or draining a pause) it is the display. */
+  private readonly onFrame = (_now: number, meta: VideoFrameCallbackMetadata): void => {
+    if (this.disposed) return
+    this.watchHandle = this.video.requestVideoFrameCallback(this.onFrame)
+    this.presented++
+    this.lastMedia = meta.mediaTime
+    if ((this._playing || this.draining) && this.calibrated && !this._loading) {
       const i = nearestFrameIndex(this.pts, meta.mediaTime + this.offsetSec)
       this._target = i
       this.show(i)
-      this.playHandle = this.video.requestVideoFrameCallback(tick)
     }
-    this.playHandle = this.video.requestVideoFrameCallback(tick)
-  }
-
-  private stopPlayLoop(): void {
-    if (this.playHandle !== null) this.video.cancelVideoFrameCallback(this.playHandle)
-    this.playHandle = null
-    this.draining = false
+    this.presentHook?.()
   }
 
   private show(i: number): void {
@@ -411,7 +414,8 @@ export class PlayerController {
     // Mid-point of the first frame on a timeline that starts at 0. A timeline that starts later still shows the
     // first frame here (a seek before the first frame shows the first frame).
     const guess = p.length > 1 ? (p[1] - p[0]) / 2 : 0
-    const mediaTime = await this.seekRaw(guess, p[0])
+    // Calibration is the first seek after a load: a frame presented since then is the first frame.
+    const mediaTime = await this.seekRaw(guess, p[0], () => true)
     if (gen !== this.gen) return
     if (mediaTime === null) throw new Error('calibration seek failed')
     this.offsetSec = p[0] - mediaTime
@@ -421,51 +425,64 @@ export class PlayerController {
 
   /** Seeks to frame i; resolves with the index of the frame rVFC reports on screen, null if the seek failed. */
   private async seekIndex(i: number): Promise<number | null> {
-    const mediaTime = await this.seekRaw(seekTargetSec(this.pts, i, this.offsetSec), this.offsetSec)
+    const mediaTime = await this.seekRaw(
+      seekTargetSec(this.pts, i, this.offsetSec),
+      this.offsetSec,
+      (m) => nearestFrameIndex(this.pts, m + this.offsetSec) === i
+    )
     return mediaTime === null ? null : nearestFrameIndex(this.pts, mediaTime + this.offsetSec)
   }
 
   /**
-   * Sets currentTime = t and resolves with the mediaTime of the frame presented for it: the rVFC value once `seeked`
-   * has fired (see the fallback in the class comment). null when the seek cannot complete (no media, src removed,
-   * timeout). `offsetEstimate` maps currentTime to the PTS grid in the fallback.
+   * Sets currentTime = t and resolves with the mediaTime of the frame presented for it (see "Paused seeks" in the
+   * class comment). `isSought(lastMedia)` says whether the frame last presented is the one this seek asks for;
+   * `offsetEstimate` maps currentTime to the PTS grid in the fallback. null when the seek cannot complete (no media,
+   * src removed, timeout).
    */
-  private seekRaw(t: number, offsetEstimate: number): Promise<number | null> {
+  private seekRaw(t: number, offsetEstimate: number, isSought: (lastMedia: number) => boolean): Promise<number | null> {
     const v = this.video
     if (v.readyState < HAVE_METADATA) return Promise.resolve(null)
     const rvfcTimeout = this.opts.rvfcTimeoutMs ?? 1000
+    const before = this.presented
     return new Promise((resolve) => {
-      let media: number | null = null
       let seeked = false
       let finished = false
       let fallback: ReturnType<typeof setTimeout> | null = null
       const finish = (m: number | null): void => {
         if (finished) return
         finished = true
-        v.cancelVideoFrameCallback(handle)
         v.removeEventListener('seeked', onSeeked)
         v.removeEventListener('emptied', abort)
         clearTimeout(hard)
         if (fallback) clearTimeout(fallback)
         if (this.abortSeek === abort) this.abortSeek = null
+        if (this.presentHook === check) this.presentHook = null
         resolve(m)
       }
       const abort = (): void => finish(null)
-      const handle = v.requestVideoFrameCallback((_now, meta) => {
-        media = meta.mediaTime
-        if (seeked) finish(media)
-      })
-      const onSeeked = (): void => {
+      const check = (): void => {
+        if (seeked && this.presented > before) finish(this.lastMedia)
+      }
+      const onSeeked = async (): Promise<void> => {
         seeked = true
-        if (media !== null) return finish(media)
-        fallback = setTimeout(() => {
-          void nextFrame().then(() => {
-            const i = frameIndexAtMs(this.pts, (v.currentTime + offsetEstimate - this.pts[0]) * 1000)
-            finish(this.pts[i] - offsetEstimate)
-          })
-        }, rvfcTimeout)
+        check()
+        const started = Date.now()
+        for (let k = 0; k < SAME_FRAME_WAIT_FRAMES && !finished; k++) await nextFrame()
+        if (finished) return
+        if (this.lastMedia !== null && isSought(this.lastMedia)) return finish(this.lastMedia)
+        fallback = setTimeout(
+          () => {
+            if (this.lastMedia !== null) return finish(this.lastMedia)
+            void nextFrame().then(() => {
+              const i = frameIndexAtMs(this.pts, (v.currentTime + offsetEstimate - this.pts[0]) * 1000)
+              finish(this.pts[i] - offsetEstimate)
+            })
+          },
+          Math.max(0, rvfcTimeout - (Date.now() - started))
+        )
       }
       const hard = setTimeout(abort, this.opts.seekTimeoutMs ?? 5000)
+      this.presentHook = check
       v.addEventListener('seeked', onSeeked)
       v.addEventListener('emptied', abort)
       this.abortSeek = abort

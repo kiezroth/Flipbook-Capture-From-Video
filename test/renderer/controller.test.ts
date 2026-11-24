@@ -6,7 +6,8 @@ import { formatMs, indexAtDisplayedMs, PlayerController, type PlayerStatus, type
 /**
  * A <video> stand-in with Chromium's observable behaviour: frame k is presented at mediaTime mt[k] = pts[k] − shift;
  * a seek presents the frame whose span contains currentTime (the first frame before it), fires rVFC, then `seeked`.
- * `land` can make a seek present a different frame; `rvfcOnSeek = false` withholds rVFC on paused seeks.
+ * Like Electron 45, a seek that lands on the frame already shown presents nothing (no rVFC).
+ * `land` can make a seek present a different frame; `rvfcBroken = true` never calls rVFC callbacks.
  */
 class FakeVideo extends EventTarget {
   readyState = 0
@@ -16,7 +17,7 @@ class FakeVideo extends EventTarget {
   defaultPlaybackRate = 1
   shown = -1
   seeks: number[] = []
-  rvfcOnSeek = true
+  rvfcBroken = false
   land: (natural: number) => number = (n) => n
   private mt: number[] = []
   private _src = ''
@@ -64,8 +65,7 @@ class FakeVideo extends EventTarget {
     this.seeks.push(t)
     const k = this.land(this.frameAt(t))
     setTimeout(() => {
-      if (this.rvfcOnSeek) this.present(k)
-      else this.shown = k
+      if (k !== this.shown) this.present(k)
       this.dispatchEvent(new Event('seeked'))
     }, 1)
   }
@@ -110,6 +110,7 @@ class FakeVideo extends EventTarget {
 
   private present(k: number): void {
     this.shown = k
+    if (this.rvfcBroken) return
     const cbs = [...this.cbs.values()]
     this.cbs.clear()
     for (const cb of cbs) cb(0, { mediaTime: this.mt[k] } as VideoFrameCallbackMetadata)
@@ -141,6 +142,18 @@ test.each([
   await c.execute({ type: 'stepFrame', delta: 45 })
   expect(v.shown).toBe(45)
   expect(c.displayedIndex).toBe(45)
+})
+
+test('a seek to the frame already on screen does not wait for the rVFC timeout', async () => {
+  const { v, c } = make(cfr, 1.5)
+  const t0 = Date.now()
+  await c.load('u') // calibration and the first verification both land on the frame shown at load
+  await c.execute({ type: 'stepFrame', delta: 3 })
+  await c.execute({ type: 'togglePlay' })
+  await c.execute({ type: 'togglePlay' }) // pause re-seeks to the frame on screen
+  await c.pauseAndSettle()
+  expect(Date.now() - t0).toBeLessThan(700)
+  expect([c.displayedIndex, v.shown, c.verified]).toEqual([v.shown, c.displayedIndex, true])
 })
 
 test('rapid steps coalesce onto the newest target', async () => {
@@ -193,9 +206,17 @@ test('a seek that still lands wrong blocks capture and shows the frame really on
   expect([c.displayedIndex, v.shown, c.verified]).toEqual([21, 21, true])
 })
 
-test('without rVFC on paused seeks, falls back to seeked + currentTime', async () => {
+test('a seek that presents nothing new keeps the frame on screen: mismatch, capture blocked', async () => {
+  const { v, c } = make(cfr, 1.5, { rvfcTimeoutMs: 50 })
+  await c.load('u')
+  v.land = () => v.shown // the decoder never moves off the frame on screen
+  await c.execute({ type: 'stepFrame', delta: 4 })
+  expect([c.displayedIndex, c.targetIndex, v.shown, c.verified]).toEqual([0, 0, 0, false])
+})
+
+test('when rVFC never reports a frame, falls back to seeked + currentTime', async () => {
   const { v, c } = make(cfr, 1.5, { rvfcTimeoutMs: 5 })
-  v.rvfcOnSeek = false
+  v.rvfcBroken = true
   await c.load('u')
   await c.execute({ type: 'stepFrame', delta: 12 })
   expect([c.displayedIndex, v.shown, c.verified]).toEqual([12, 12, true])
