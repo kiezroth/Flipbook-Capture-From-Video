@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'vitest'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { createCanvas, loadImage, type Image } from '@napi-rs/canvas'
@@ -88,4 +88,14 @@ test('a long name never spills into the neighbouring cell', async () => {
     return ctx.getImageData(0, 0, 128 + settings.gap, 72).data
   }
   expect(Buffer.from(await pixels(long.pages[0])).equals(Buffer.from(await pixels(short.pages[0])))).toBe(true)
+})
+
+test('re-export with fewer pages removes the stale pages of that name only', async () => {
+  const first = await exportFlipbook({ ...req, frames: fortyThreeFrames, fileName: 'slash' })
+  expect(first.pages.map((p) => basename(p))).toEqual(['slash_p1.png', 'slash_p2.png'])
+  const keep = ['slash_p2.png.bak', 'other_p2.png', 'slash_p2x.png', 'slash_p0.png', 'slashy_p3.png']
+  for (const n of keep) writeFileSync(join(req.outDir, n), 'x')
+  writeFileSync(join(req.outDir, 'slash_p3.png'), 'stale') // from an even older export
+  await exportFlipbook({ ...req, frames: tenFramesFromCfr30, fileName: 'slash' })
+  expect(readdirSync(req.outDir).sort()).toEqual([...keep, 'slash_log.json', 'slash_log.txt', 'slash_p1.png'].sort())
 })

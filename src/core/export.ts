@@ -1,5 +1,5 @@
 import { createCanvas } from '@napi-rs/canvas'
-import { mkdir, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { buildExportLog, formatLogTxt } from './exportLog'
 import { cropImage, drawFitted, drawLabel } from './image'
@@ -86,5 +86,21 @@ export async function exportFlipbook(r: ExportRequest): Promise<ExportResult> {
     await writeFile(tmp, f.data)
     await rename(tmp, f.path)
   }
+  await removeStalePages(outDir, r.fileName, pages.length)
   return { pages, logTxt, logJson }
+}
+
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Deletes `<fileName>_p<N>.png` with N > pageCount left in outDir by an earlier export under the same name (so the
+ * folder never mixes pages of two exports). Only files of exactly that pattern are touched.
+ */
+async function removeStalePages(outDir: string, fileName: string, pageCount: number): Promise<void> {
+  // Windows file names are case-insensitive: SLASH_p3.png is the same export's page
+  const re = new RegExp(`^${escapeRegExp(fileName)}_p([1-9]\\d*)\\.png$`, process.platform === 'win32' ? 'i' : '')
+  for (const name of await readdir(outDir)) {
+    const m = re.exec(name)
+    if (m && Number(m[1]) > pageCount) await rm(join(outDir, name), { force: true })
+  }
 }
