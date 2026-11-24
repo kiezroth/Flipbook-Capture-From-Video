@@ -29,10 +29,15 @@ export type NumberField = 'cellW' | 'cellH' | 'columns' | 'gap' | 'maxLongEdge' 
 export type FieldKey = NumberField | 'fileName'
 export type FieldErrors = Partial<Record<FieldKey, string>>
 
-export function toForm(s: ExportSettings): FormValues {
+/**
+ * The form for saved settings. With "giữ theo tỉ lệ video" ticked the height is re-locked to `video` (the current
+ * video), since the settings may have been saved for another video (Import Video keeps them).
+ */
+export function toForm(s: ExportSettings, video: VideoInfo | null): FormValues {
+  const locked = s.keepVideoAspect && video && video.width > 0 && video.height > 0
   return {
     cellW: String(s.cellW),
-    cellH: String(s.cellH),
+    cellH: String(locked ? aspectLockedHeight(s.cellW, video) : s.cellH),
     keepVideoAspect: s.keepVideoAspect,
     fit: s.fit,
     columnsAuto: s.columns === 'auto',

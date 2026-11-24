@@ -19,7 +19,7 @@ function Form() {
   const closeExport = useStore((s) => s.closeExport)
   const video = app?.video?.info ?? null
   const frameCount = app?.project?.frames.length ?? 0
-  const [form, setForm] = useState<FormValues>(() => toForm(app?.project?.exportSettings ?? DEFAULT_EXPORT))
+  const [form, setForm] = useState<FormValues>(() => toForm(app?.project?.exportSettings ?? DEFAULT_EXPORT, video))
   const [exporting, setExporting] = useState(false)
 
   const parsed = useMemo(() => parseForm(form), [form])

@@ -11,13 +11,13 @@ test('aspect lock', () => {
 })
 
 test('defaults round-trip through the form', () => {
-  const r = parseForm(toForm(DEFAULT_EXPORT))
+  const r = parseForm(toForm(DEFAULT_EXPORT, null))
   expect(r.errors).toEqual({})
   expect(r.settings).toEqual(DEFAULT_EXPORT)
 })
 
 test('empty and malformed numbers are field errors, never NaN settings', () => {
-  const f = toForm(DEFAULT_EXPORT)
+  const f = toForm(DEFAULT_EXPORT, null)
   for (const bad of ['', ' ', 'abc', '1.5', '-3', '0']) {
     const r = parseForm({ ...f, cellW: bad })
     expect(r.settings).toBeNull()
@@ -29,7 +29,7 @@ test('empty and malformed numbers are field errors, never NaN settings', () => {
 })
 
 test('blank folder and name mean defaults; bad file names are rejected', () => {
-  const f = toForm(DEFAULT_EXPORT)
+  const f = toForm(DEFAULT_EXPORT, null)
   expect(parseForm({ ...f, fileName: '  ', outDir: ' ' }).settings).toMatchObject({ fileName: null, outDir: null })
   expect(parseForm({ ...f, fileName: ' my book ', outDir: 'D:\\out' }).settings).toMatchObject({ fileName: 'my book', outDir: 'D:\\out' })
   expect(parseForm({ ...f, fileName: 'a/b' }).errors.fileName).toBeTruthy()
@@ -47,4 +47,13 @@ test('Enter during IME composition is ignored', () => {
   expect(isCompositionEnter({ key: 'Enter', nativeEvent: { isComposing: true } })).toBe(true)
   expect(isCompositionEnter({ key: 'Enter', nativeEvent: { isComposing: false } })).toBe(false)
   expect(isCompositionEnter({ key: 'a', nativeEvent: { isComposing: true } })).toBe(false)
+})
+
+test('opening the form re-locks the cell height to the current video when the aspect is kept', () => {
+  const s = { ...DEFAULT_EXPORT, cellW: 256, cellH: 144, keepVideoAspect: true } // saved for a 16:9 video
+  const portrait = { width: 360, height: 640 } as VideoInfo // then a portrait video was imported
+  expect(toForm(s, portrait).cellH).toBe('455')
+  expect(toForm(s, { width: 640, height: 360 } as VideoInfo).cellH).toBe('144')
+  expect(toForm({ ...s, keepVideoAspect: false }, portrait).cellH).toBe('144') // not locked: kept as saved
+  expect(toForm(s, null).cellH).toBe('144') // no video: nothing to lock to
 })
