@@ -98,3 +98,20 @@ test('menu without a video; failures in close and undo become toasts and the win
     await app.close()
   }
 })
+
+test('Help > Kết nối với Claude shows the claude mcp add command with an editable root list', async () => {
+  const { app, win } = await launch({ FC_E2E_OUT_DIR: join(tmp, 'extra root') })
+  try {
+    await app.evaluate(({ Menu }) => Menu.getApplicationMenu()!.getMenuItemById('connectClaude')!.click())
+    const cmd = win.getByTestId('connect-command')
+    await expect(cmd).toHaveValue(/^claude mcp add flipbook-capture -e ELECTRON_RUN_AS_NODE=1 -- ".+" ".+server\.cjs" --root ".+"$/)
+    await win.getByRole('button', { name: 'Thêm thư mục…' }).click()
+    await expect(cmd).toHaveValue(/--root ".+" --root ".+extra root"$/)
+    await win.getByRole('button', { name: 'Xóa' }).first().click()
+    await expect(cmd).toHaveValue(/--root ".+extra root"$/)
+    await win.keyboard.press('Escape')
+    await expect(win.getByTestId('connect-dialog')).toHaveCount(0)
+  } finally {
+    await app.close()
+  }
+})
