@@ -3,7 +3,7 @@ import { expect, test } from 'vitest'
 import { shortcutFor, type KeyInfo } from '../../src/shared/shortcuts'
 
 const k = (key: string, o: Partial<KeyInfo> = {}): ReturnType<typeof shortcutFor> =>
-  shortcutFor({ key, ctrlKey: true, shiftKey: false, altKey: false, inEditable: false, ...o })
+  shortcutFor({ key, ctrlKey: true, shiftKey: false, altKey: false, inEditable: false, repeat: false, ...o })
 
 test('file and edit shortcuts', () => {
   expect(k('n')).toBe('new')
@@ -27,4 +27,11 @@ test('text fields keep their own undo, but Ctrl+S still saves', () => {
   expect(k('z', { inEditable: true })).toBeNull()
   expect(k('y', { inEditable: true })).toBeNull()
   expect(k('s', { inEditable: true })).toBe('save')
+})
+
+test('holding a key does not repeat file commands; undo/redo keep repeating', () => {
+  for (const key of ['n', 'o', 's', 'i', 'e']) expect(k(key, { repeat: true })).toBeNull()
+  expect(k('S', { shiftKey: true, repeat: true })).toBeNull()
+  expect(k('z', { repeat: true })).toBe('undo')
+  expect(k('y', { repeat: true })).toBe('redo')
 })

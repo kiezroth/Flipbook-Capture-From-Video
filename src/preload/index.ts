@@ -40,8 +40,12 @@ window.addEventListener(
   (e) => {
     const t = e.target as HTMLElement | null
     const inEditable = !!t && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')
-    const id = shortcutFor({ key: e.key, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, inEditable })
-    if (!id) return
+    const keys = { key: e.key, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, inEditable }
+    const id = shortcutFor({ ...keys, repeat: e.repeat })
+    if (!id) {
+      if (e.repeat && shortcutFor({ ...keys, repeat: false })) e.preventDefault() // swallow held-key repeats
+      return
+    }
     e.preventDefault()
     e.stopPropagation()
     ipcRenderer.send(IPC.menuCommand, id)
