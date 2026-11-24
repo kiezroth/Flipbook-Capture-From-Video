@@ -259,3 +259,97 @@ test('rejects unsupported formatVersion with the version in the message', async 
   expect(err).toBeInstanceOf(InvalidProjectError)
   expect((err as Error).message).toContain('2')
 })
+
+test('failure DURING streaming leaves target untouched and no temp file', async () => {
+  const dir = join(tmp, 'midstream')
+  mkdirSync(dir)
+  const fd = join(dir, 'frames')
+  mkdirSync(fd)
+  writeFileSync(join(fd, 'f1.png'), pngBytes('red'))
+  writeFileSync(join(fd, 'f2.png'), pngBytes('blue'))
+  const t = join(dir, 'p.fbproj')
+  await writeFbproj(t, { project, video: { kind: 'file', path: FIXTURES.cfr30 }, framesDir: fd })
+  const before = readFileSync(t)
+  // first progress tick happens after sizes were stat-ed and before any streaming: truncate a frame
+  // so the size yazl was promised no longer matches the bytes read
+  let done = false
+  await expect(
+    writeFbproj(t, { project, video: { kind: 'file', path: FIXTURES.cfr30 }, framesDir: fd }, () => {
+      if (!done) {
+        done = true
+        writeFileSync(join(fd, 'f2.png'), Buffer.from('x'))
+      }
+    })
+  ).rejects.toThrow()
+  expect(readFileSync(t)).toEqual(before)
+  expect(readdirSync(dir).filter((n) => n.includes('.tmp-'))).toEqual([])
+})
+
+test('ZIP64 structures are read correctly', async () => {
+  const t = nextTarget()
+  await writeFbproj(t, { project, video: { kind: 'file', path: FIXTURES.cfr30 }, framesDir }, undefined, {
+    forceZip64: true
+  })
+  const r = await openFbproj(t)
+  expect(r.project).toEqual(project)
+  expect(await r.readFrame('f2')).toEqual(readFileSync(join(framesDir, 'f2.png')))
+  expect(await streamToBuffer(r.openVideoRange(r.video.start, r.video.end - 1))).toEqual(readFileSync(FIXTURES.cfr30))
+  await r.close()
+})
+
+test('data offset uses the local header extra field, not the central directory', async () => {
+  // hand-built stored zip whose LOCAL header carries a 20-byte extra field the central directory lacks
+  const name = Buffer.from('project.json')
+  const data = Buffer.from(JSON.stringify(project))
+  const video = Buffer.from('VIDEODATA')
+  const vname = Buffer.from('video/v.mp4')
+  const extra = Buffer.alloc(20, 0xab)
+  const crc32 = (b: Buffer): number => {
+    let c = ~0
+    for (const x of b) {
+      c ^= x
+      for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1))
+    }
+    return ~c >>> 0
+  }
+  const parts: Buffer[] = []
+  const central: Buffer[] = []
+  let offset = 0
+  for (const [nm, buf, ex] of [
+    [name, data, Buffer.alloc(0)],
+    [vname, video, extra]
+  ] as const) {
+    const lh = Buffer.alloc(30)
+    lh.writeUInt32LE(0x04034b50, 0)
+    lh.writeUInt16LE(20, 4)
+    lh.writeUInt32LE(crc32(buf), 14)
+    lh.writeUInt32LE(buf.length, 18)
+    lh.writeUInt32LE(buf.length, 22)
+    lh.writeUInt16LE(nm.length, 26)
+    lh.writeUInt16LE(ex.length, 28)
+    const ch = Buffer.alloc(46)
+    ch.writeUInt32LE(0x02014b50, 0)
+    ch.writeUInt16LE(20, 4)
+    ch.writeUInt16LE(20, 6)
+    ch.writeUInt32LE(crc32(buf), 16)
+    ch.writeUInt32LE(buf.length, 20)
+    ch.writeUInt32LE(buf.length, 24)
+    ch.writeUInt16LE(nm.length, 28)
+    ch.writeUInt32LE(offset, 42)
+    central.push(ch, nm)
+    parts.push(lh, nm, ex, buf)
+    offset += 30 + nm.length + ex.length + buf.length
+  }
+  const cd = Buffer.concat(central)
+  const eocd = Buffer.alloc(22)
+  eocd.writeUInt32LE(0x06054b50, 0)
+  eocd.writeUInt16LE(2, 8)
+  eocd.writeUInt16LE(2, 10)
+  eocd.writeUInt32LE(cd.length, 12)
+  eocd.writeUInt32LE(offset, 16)
+  const f = join(tmp, 'extra.fbproj')
+  writeFileSync(f, Buffer.concat([...parts, cd, eocd]))
+  const r = await openFbproj(f)
+  expect(await streamToBuffer(r.openVideoRange(r.video.start, r.video.end - 1))).toEqual(video)
+  await r.close()
+})

@@ -109,6 +109,15 @@ async function resolveData(fh: fs.promises.FileHandle, e: RawEntry): Promise<Sto
   return { name: e.name, start: e.headerOffset + LOCAL_HEADER_SIZE + nameLen + extraLen, size: e.size }
 }
 
+/** Destroys a stream and resolves once its underlying resource is closed. */
+function destroyAndWait(s: Readable | fs.WriteStream): Promise<void> {
+  if (s.closed) return Promise.resolve()
+  return new Promise((resolve) => {
+    s.once('close', () => resolve())
+    s.destroy()
+  })
+}
+
 export async function openFbproj(path: string): Promise<FbprojReader> {
   const raw = await listEntries(path)
   const fh = await fs.promises.open(path, 'r')
@@ -179,7 +188,8 @@ export async function openFbproj(path: string): Promise<FbprojReader> {
     },
     openVideoRange: (start, endInclusive) => rangeStream(start, endInclusive),
     async close() {
-      for (const s of [...open]) s.destroy()
+      // wait for every fd to be released so a following rename-over is not racing a handle
+      await Promise.all([...open].map((s) => destroyAndWait(s)))
       open.clear()
     }
   }
@@ -188,7 +198,9 @@ export async function openFbproj(path: string): Promise<FbprojReader> {
 export async function writeFbproj(
   target: string,
   a: { project: ProjectFile; video: VideoSource; framesDir: string },
-  onProgress?: (written: number, total: number) => void
+  onProgress?: (written: number, total: number) => void,
+  /** Internal/test only: force ZIP64 structures on every entry and the end record. */
+  opts?: { forceZip64?: boolean }
 ): Promise<void> {
   const dir = dirname(target)
   const projectJson = Buffer.from(JSON.stringify(a.project), 'utf8')
@@ -221,6 +233,9 @@ export async function writeFbproj(
   if (free < needed) throw new DiskFullError(needed, free)
 
   const tmp = `${target}.tmp-${randomBytes(6).toString('hex')}`
+  const forceZip64 = opts?.forceZip64 === true
+  const sources = new Set<Readable>()
+  const sink = fs.createWriteStream(tmp)
   try {
     let written = 0
     const tick = (n: number): void => {
@@ -232,8 +247,10 @@ export async function writeFbproj(
     zip.on('error', (e) => out.destroy(e))
 
     const addLazy = (name: string, size: number, open: () => Readable, force = false): void => {
-      zip.addReadStreamLazy(name, { compress: false, size, forceZip64Format: force }, (cb) => {
+      zip.addReadStreamLazy(name, { compress: false, size, forceZip64Format: force || forceZip64 }, (cb) => {
         const s = open()
+        sources.add(s)
+        s.once('close', () => sources.delete(s))
         s.on('error', (e) => out.destroy(e))
         s.on('data', (c: Buffer | string) => tick(c.length))
         cb(null, s)
@@ -243,9 +260,9 @@ export async function writeFbproj(
     tick(projectJson.length)
     addLazy(`video/${videoName}`, videoSize, videoStream, videoSize >= ZIP64_THRESHOLD)
     for (const f of frames) addLazy(`frames/${f.id}.png`, f.size, () => fs.createReadStream(f.path))
-    zip.end()
+    zip.end({ forceZip64Format: forceZip64, comment: '' })
 
-    await pipeline(out, fs.createWriteStream(tmp))
+    await pipeline(out, sink)
     // flush to disk before the rename makes this file the project
     const fh = await fs.promises.open(tmp, 'r+')
     try {
@@ -255,7 +272,13 @@ export async function writeFbproj(
     }
     await fs.promises.rename(tmp, target)
   } catch (err) {
-    await fs.promises.rm(tmp, { force: true }).catch(() => undefined)
+    // release every handle first (Windows cannot delete a file that is still open), then remove the temp
+    await Promise.all([...sources, sink].map((s) => destroyAndWait(s)))
+    try {
+      await fs.promises.rm(tmp, { force: true, maxRetries: 5, retryDelay: 50 })
+    } catch (cleanupErr) {
+      throw new Error(`Không xóa được tệp tạm "${tmp}" sau khi lưu thất bại: ${String(cleanupErr)}`, { cause: err })
+    }
     throw err
   }
 }
