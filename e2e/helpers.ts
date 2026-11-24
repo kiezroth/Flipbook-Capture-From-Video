@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -11,15 +11,12 @@ const MAIN = resolve(__dirname, '..', 'out', 'main', 'index.js')
  * so runs never touch real recovery data. `env` adds/overrides FC_E2E_* variables.
  */
 export async function launch(env: Record<string, string> = {}): Promise<{ app: ElectronApplication; win: Page }> {
+  const userData = mkdtempSync(join(tmpdir(), 'fc-e2e-user-'))
   const app = await _electron.launch({
     args: [MAIN],
-    env: {
-      ...(process.env as Record<string, string>),
-      FC_E2E: '1',
-      FC_E2E_USER_DATA: mkdtempSync(join(tmpdir(), 'fc-e2e-user-')),
-      ...env
-    }
+    env: { ...(process.env as Record<string, string>), FC_E2E: '1', FC_E2E_USER_DATA: userData, ...env }
   })
+  app.process().once('exit', () => rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
   const win = await app.firstWindow()
   await win.waitForLoadState('domcontentloaded')
   return { app, win }
